@@ -23,32 +23,43 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   const [layout, setLayout] = useState<'song' | 'scroll'>('song')
   const [activeSongIdx, setActiveSongIdx] = useState(0)
   const [highContrast, setHighContrast] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const [notes, setNotes] = useState<Record<string, string>>(
     Object.fromEntries(initialNotes.map(n => [`${n.section_id}:${n.instrument}`, n.note_text]))
   )
-  const [editingNote, setEditingNote] = useState<string | null>(null) // key
+  const [editingNote, setEditingNote] = useState<string | null>(null)
   const [noteDraft, setNoteDraft] = useState('')
+  const [openNotes, setOpenNotes] = useState<Record<string, boolean>>({})
+
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
   function getClient() {
     if (!supabaseRef.current) supabaseRef.current = createClient()
     return supabaseRef.current
   }
 
-  const bg = highContrast ? 'bg-white' : 'bg-black'
-  const fg = highContrast ? 'text-black' : 'text-white'
-  const dim = highContrast ? 'text-zinc-500' : 'text-zinc-500'
-  const cardBg = highContrast ? 'bg-zinc-100 border border-zinc-200' : 'bg-zinc-900'
-  const borderColor = highContrast ? 'border-zinc-300' : 'border-zinc-800'
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen()
+      setIsFullscreen(true)
+    } else {
+      document.exitFullscreen()
+      setIsFullscreen(false)
+    }
+  }
+
+  const hc = highContrast
+  const bg = hc ? 'bg-white' : 'bg-black'
+  const fg = hc ? 'text-black' : 'text-white'
+  const dim = hc ? 'text-zinc-500' : 'text-zinc-500'
+  const cardBg = hc ? 'bg-zinc-100 border border-zinc-200' : 'bg-zinc-900'
+  const borderB = hc ? 'border-zinc-300' : 'border-zinc-800'
 
   async function saveNote(sectionId: string) {
     const key = `${sectionId}:${viewInstrument}`
     const text = noteDraft.trim()
     if (text) {
       await getClient().from('user_notes').upsert({
-        user_id: userId,
-        section_id: sectionId,
-        instrument: viewInstrument,
-        note_text: text,
+        user_id: userId, section_id: sectionId, instrument: viewInstrument, note_text: text,
       }, { onConflict: 'user_id,section_id,instrument' })
       setNotes(prev => ({ ...prev, [key]: text }))
     } else {
@@ -59,32 +70,50 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     setEditingNote(null)
   }
 
-  function SectionCard({ section, song }: { section: Section; song: Song }) {
+  function SectionCard({ section }: { section: Section }) {
     const instr = section.instructions.find(i => i.instrument === viewInstrument)
-    if (!instr && !section.instructions.some(i => i.instrument === viewInstrument)) return null
     const key = `${section.id}:${viewInstrument}`
     const note = notes[key]
     const isEditing = editingNote === key
+    const notesExpanded = openNotes[section.id]
 
     return (
-      <div className={`rounded-2xl px-5 py-4 ${cardBg} ${instr?.is_intro ? 'border-2 border-orange-500' : ''}`}>
-        <div className="flex items-center gap-2 mb-2">
+      <div className={`rounded-xl px-4 py-3 ${cardBg} ${instr?.is_intro ? 'border-2 border-orange-500' : ''}`}>
+        {/* Section label row */}
+        <div className="flex items-center gap-2 mb-1.5">
           <span className={`text-sm font-bold uppercase tracking-wide ${fg}`}>{section.label}</span>
           {instr?.is_intro && (
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-orange-500 text-white">INTRO</span>
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-500 text-white">INTRO</span>
           )}
         </div>
-        <p className={`text-base leading-snug ${fg}`}>{instr?.text || <span className={dim}>—</span>}</p>
+
+        {/* Instrument instruction */}
+        <p className={`text-sm leading-snug ${fg}`}>{instr?.text || <span className={dim}>—</span>}</p>
+
+        {/* Conductor notes — collapsible */}
         {section.comments && (
-          <p className={`text-xs mt-2 ${dim} leading-snug`}>{section.comments}</p>
+          <div className="mt-2">
+            <button
+              onClick={() => setOpenNotes(prev => ({ ...prev, [section.id]: !prev[section.id] }))}
+              className={`flex items-center gap-1 text-[10px] font-medium ${dim}`}
+            >
+              <svg className={`w-3 h-3 transition-transform ${notesExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              Conductor notes
+            </button>
+            {notesExpanded && (
+              <p className={`mt-1.5 text-xs leading-relaxed ${hc ? 'text-zinc-600' : 'text-zinc-400'}`}>{section.comments}</p>
+            )}
+          </div>
         )}
 
         {/* Personal note */}
         {isEditing ? (
-          <div className="mt-3 space-y-2">
+          <div className="mt-2 space-y-1.5">
             <textarea
-              className={`w-full rounded-xl px-3 py-2 text-sm resize-none focus:outline-none ${
-                highContrast ? 'bg-white border border-zinc-400 text-black' : 'bg-zinc-800 text-white border border-zinc-700'
+              className={`w-full rounded-lg px-3 py-2 text-xs resize-none focus:outline-none ${
+                hc ? 'bg-white border border-zinc-400 text-black' : 'bg-zinc-800 text-white border border-zinc-700'
               }`}
               rows={3}
               value={noteDraft}
@@ -93,20 +122,16 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
               autoFocus
             />
             <div className="flex gap-2">
-              <button
-                onClick={() => saveNote(section.id)}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white text-black"
-              >Save</button>
-              <button
-                onClick={() => setEditingNote(null)}
-                className={`text-xs font-semibold px-3 py-1.5 rounded-lg ${highContrast ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-zinc-300'}`}
-              >Cancel</button>
+              <button onClick={() => saveNote(section.id)}
+                className="text-[10px] font-semibold px-3 py-1 rounded-lg bg-white text-black">Save</button>
+              <button onClick={() => setEditingNote(null)}
+                className={`text-[10px] font-semibold px-3 py-1 rounded-lg ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-zinc-300'}`}>Cancel</button>
             </div>
           </div>
         ) : (
           <button
             onClick={() => { setEditingNote(key); setNoteDraft(note ?? '') }}
-            className={`mt-2 text-xs ${note ? (highContrast ? 'text-zinc-700' : 'text-zinc-300') : dim} flex items-center gap-1`}
+            className={`mt-2 text-[10px] flex items-center gap-1 ${note ? (hc ? 'text-zinc-700' : 'text-zinc-300') : dim}`}
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -120,27 +145,25 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
 
   function SongBlock({ song, compact }: { song: Song; compact?: boolean }) {
     return (
-      <div className="space-y-3">
-        <div className={`flex items-center gap-3 ${compact ? 'pt-6' : ''}`}>
-          <span className={`font-bold text-base ${fg}`}>{song.title}</span>
+      <div className={`space-y-2 ${compact ? 'pt-6' : ''}`}>
+        <div className="flex items-center gap-2">
+          <span className={`font-bold text-sm ${fg}`}>{song.title}</span>
           {song.scale && (
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-md ${highContrast ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-300'}`}>
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-300'}`}>
               {song.scale}
             </span>
           )}
-          {song.medley_group && <span className="text-xs text-zinc-500">MEDLEY</span>}
+          {song.medley_group && <span className={`text-[10px] ${dim}`}>MEDLEY</span>}
           {song.reference_links[0] && (
             <a href={song.reference_links[0]} target="_blank" rel="noopener noreferrer"
-              className="ml-auto text-zinc-500" aria-label="Reference track">
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+              className={`ml-auto ${dim}`} aria-label="Reference track">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V9.38a8.16 8.16 0 004.77 1.52V7.45a4.85 4.85 0 01-1-.76z"/>
               </svg>
             </a>
           )}
         </div>
-        {song.sections.map(section => (
-          <SectionCard key={section.id} section={section} song={song} />
-        ))}
+        {song.sections.map(section => <SectionCard key={section.id} section={section} />)}
       </div>
     )
   }
@@ -150,44 +173,45 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   return (
     <div className={`min-h-screen ${bg} ${fg} flex flex-col`}>
       {/* Running order strip */}
-      <div className={`border-b ${borderColor} overflow-x-auto`}>
-        <div className="flex gap-2 px-4 py-3 min-w-max">
+      <div className={`border-b ${borderB} overflow-x-auto shrink-0`}>
+        <div className="flex gap-2 px-4 py-2.5 min-w-max">
+          <Link href="/services" className={`shrink-0 rounded-lg px-3 py-1 text-xs font-medium ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'} flex items-center gap-1`}>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+          </Link>
           {songs.map((song, si) => (
-            <button
-              key={song.id}
+            <button key={song.id}
               onClick={() => { setActiveSongIdx(si); if (layout === 'scroll') document.getElementById(`song-${si}`)?.scrollIntoView({ behavior: 'smooth' }) }}
-              className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`shrink-0 rounded-lg px-3 py-1 text-xs font-medium transition-all active:scale-95 ${
                 layout === 'song' && si === activeSongIdx
-                  ? (highContrast ? 'bg-black text-white' : 'bg-white text-black')
-                  : (highContrast ? 'bg-zinc-200 text-zinc-700' : 'bg-zinc-800 text-zinc-400')
-              }`}
-            >
-              {song.title.length > 18 ? song.title.slice(0, 18) + '…' : song.title}
+                  ? (hc ? 'bg-black text-white' : 'bg-white text-black')
+                  : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
+              }`}>
+              {song.title.length > 16 ? song.title.slice(0, 16) + '…' : song.title}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 px-4 pt-4 pb-32 max-w-2xl mx-auto w-full">
+      {/* Content */}
+      <div className="flex-1 px-4 pt-3 pb-32 max-w-2xl mx-auto w-full overflow-y-auto">
         {layout === 'song' ? (
-          <div className="space-y-3">
+          <div className="space-y-2">
             <SongBlock song={activeSong} />
             <div className="flex gap-3 pt-2">
-              <button
-                onClick={() => setActiveSongIdx(i => Math.max(0, i - 1))}
-                disabled={activeSongIdx === 0}
-                className={`flex-1 rounded-xl py-3 font-semibold text-sm disabled:opacity-30 ${highContrast ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}
-              >← Prev song</button>
-              <button
-                onClick={() => setActiveSongIdx(i => Math.min(songs.length - 1, i + 1))}
-                disabled={activeSongIdx === songs.length - 1}
-                className={`flex-1 rounded-xl py-3 font-semibold text-sm disabled:opacity-30 ${highContrast ? 'bg-black text-white' : 'bg-zinc-800 text-white'}`}
-              >Next song →</button>
+              <button onClick={() => setActiveSongIdx(i => Math.max(0, i - 1))} disabled={activeSongIdx === 0}
+                className={`flex-1 rounded-xl py-3 font-semibold text-sm disabled:opacity-30 active:scale-95 transition-transform ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
+                ← Prev song
+              </button>
+              <button onClick={() => setActiveSongIdx(i => Math.min(songs.length - 1, i + 1))} disabled={activeSongIdx === songs.length - 1}
+                className={`flex-1 rounded-xl py-3 font-semibold text-sm disabled:opacity-30 active:scale-95 transition-transform ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
+                Next song →
+              </button>
             </div>
           </div>
         ) : (
-          <div className="space-y-8">
+          <div className="space-y-6">
             {songs.map((song, si) => (
               <div key={song.id} id={`song-${si}`}>
                 <SongBlock song={song} compact />
@@ -198,42 +222,39 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       </div>
 
       {/* Bottom bar */}
-      <div className={`fixed bottom-0 left-0 right-0 border-t ${borderColor} ${bg} px-4 py-3`}>
-        <div className="flex items-center gap-2 mb-3 overflow-x-auto">
+      <div className={`fixed bottom-0 left-0 right-0 border-t ${borderB} ${bg} px-4 pt-2.5 pb-4`}>
+        <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto">
           {instruments.map(instr => (
-            <button
-              key={instr}
-              onClick={() => setViewInstrument(instr)}
-              className={`shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+            <button key={instr} onClick={() => setViewInstrument(instr)}
+              className={`shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
                 instr === viewInstrument
-                  ? (highContrast ? 'bg-black text-white' : 'bg-white text-black')
-                  : (highContrast ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
-              }`}
-            >
+                  ? (hc ? 'bg-black text-white' : 'bg-white text-black')
+                  : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
+              }`}>
               {instr}
             </button>
           ))}
-          <button
-            onClick={() => setHighContrast(h => !h)}
-            className={`shrink-0 ml-auto rounded-lg px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${highContrast ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}
-          >
-            {highContrast ? 'Stage off' : 'Stage'}
-          </button>
+          <div className="ml-auto flex gap-1.5 shrink-0">
+            <button onClick={toggleFullscreen}
+              className={`rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
+              {isFullscreen ? 'Exit FS' : 'Full'}
+            </button>
+            <button onClick={() => setHighContrast(h => !h)}
+              className={`rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
+              {hc ? 'Stage off' : 'Stage'}
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-3">
-          <button
-            onClick={() => setLayout('song')}
-            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold ${layout === 'song' ? (highContrast ? 'bg-black text-white' : 'bg-white text-black') : (highContrast ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')}`}
-          >Song by song</button>
-          <button
-            onClick={() => setLayout('scroll')}
-            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold ${layout === 'scroll' ? (highContrast ? 'bg-black text-white' : 'bg-white text-black') : (highContrast ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')}`}
-          >All on one page</button>
-        </div>
-
-        <div className="mt-2">
-          <Link href={`/services/${serviceId}`} className={`text-xs ${dim}`}>← Back</Link>
+          <button onClick={() => setLayout('song')}
+            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all active:scale-95 ${layout === 'song' ? (hc ? 'bg-black text-white' : 'bg-white text-black') : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')}`}>
+            Song by song
+          </button>
+          <button onClick={() => setLayout('scroll')}
+            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all active:scale-95 ${layout === 'scroll' ? (hc ? 'bg-black text-white' : 'bg-white text-black') : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')}`}>
+            All on one page
+          </button>
         </div>
       </div>
     </div>

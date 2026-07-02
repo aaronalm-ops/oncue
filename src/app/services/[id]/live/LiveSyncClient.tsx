@@ -24,6 +24,17 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
   const [viewInstrument, setViewInstrument] = useState(userInstrument)
   const [notesOpen, setNotesOpen] = useState(false)
   const [pressing, setPressing] = useState<'prev' | 'next' | null>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen()
+      setIsFullscreen(true)
+    } else {
+      document.exitFullscreen()
+      setIsFullscreen(false)
+    }
+  }
 
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
   function getClient() {
@@ -112,6 +123,11 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
       {/* Running order strip */}
       <div className={`border-b ${borderB} overflow-x-auto shrink-0`}>
         <div className="flex gap-2 px-4 py-2.5 min-w-max">
+          <Link href="/services" className={`shrink-0 rounded-lg px-3 py-1 text-xs font-medium flex items-center gap-1 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+          </Link>
           {songs.map((song, si) => (
             <button key={song.id} onClick={() => jumpToSong(si)}
               className={`shrink-0 rounded-lg px-3 py-1 text-xs font-medium transition-all active:scale-95 ${
@@ -220,12 +236,16 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
               {instr}
             </button>
           ))}
-          <button onClick={() => setHighContrast(h => !h)}
-            className={`shrink-0 ml-auto rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${
-              hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'
-            }`}>
-            {hc ? 'Stage off' : 'Stage'}
-          </button>
+          <div className="ml-auto flex gap-1.5 shrink-0">
+            <button onClick={toggleFullscreen}
+              className={`rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
+              {isFullscreen ? 'Exit FS' : 'Full'}
+            </button>
+            <button onClick={() => setHighContrast(h => !h)}
+              className={`rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
+              {hc ? 'Stage off' : 'Stage'}
+            </button>
+          </div>
         </div>
 
         {/* Prev / Next */}
