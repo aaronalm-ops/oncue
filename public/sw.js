@@ -1,11 +1,9 @@
-const CACHE = 'oncue-v3'
+const CACHE = 'oncue-v4'
 
 self.addEventListener('install', e => {
-  // Pre-cache only static assets — NOT pages (they require auth and return 302s
-  // which cause cache.addAll to throw, killing the SW install entirely)
   e.waitUntil(
     caches.open(CACHE).then(cache =>
-      cache.addAll(['/manifest.json', '/dcc-logo.png'])
+      cache.addAll(['/manifest.json', '/dcc-logo.png', '/api/icon-192', '/api/icon-512'])
     )
   )
   self.skipWaiting()

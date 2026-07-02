@@ -2,8 +2,14 @@
 
 import { useEffect, useState } from 'react'
 
+type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void> }
+
+declare global {
+  interface Window { __pwaPrompt: BeforeInstallPromptEvent | null }
+}
+
 export default function RegisterSW() {
-  const [installEvent, setInstallEvent] = useState<Event & { prompt?: () => void } | null>(null)
+  const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null)
   const [showIOSHint, setShowIOSHint] = useState(false)
   const [dismissed, setDismissed] = useState(false)
 
@@ -12,24 +18,31 @@ export default function RegisterSW() {
       navigator.serviceWorker.register('/sw.js').catch(() => {})
     }
 
-    // Already installed as PWA — don't show banner
+    // Already running as installed PWA — hide banner
     if (window.matchMedia('(display-mode: standalone)').matches) return
-    if (dismissed) return
 
-    // Android/Chrome — capture the install prompt
+    // Pick up event captured by the inline script before React loaded
+    if (window.__pwaPrompt) {
+      setInstallEvent(window.__pwaPrompt)
+      window.__pwaPrompt = null
+    }
+
+    // Also listen for the event firing after mount (e.g. on return visits)
     const handler = (e: Event) => {
       e.preventDefault()
-      setInstallEvent(e)
+      setInstallEvent(e as BeforeInstallPromptEvent)
     }
     window.addEventListener('beforeinstallprompt', handler)
 
     // iOS Safari — no beforeinstallprompt, show manual hint
-    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !(window as unknown as { MSStream: unknown }).MSStream
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
-    if (isIOS && isSafari) setShowIOSHint(true)
+    const ua = navigator.userAgent
+    const isIOS = /iphone|ipad|ipod/i.test(ua)
+    const isInWebAppiOS = (navigator as Navigator & { standalone?: boolean }).standalone === true
+    const isSafari = /safari/i.test(ua) && !/chrome|crios|fxios/i.test(ua)
+    if (isIOS && isSafari && !isInWebAppiOS) setShowIOSHint(true)
 
     return () => window.removeEventListener('beforeinstallprompt', handler)
-  }, [dismissed])
+  }, [])
 
   if (dismissed) return null
 
@@ -49,17 +62,13 @@ export default function RegisterSW() {
           <p className="text-white text-sm font-semibold">Install OnCue</p>
           <p className="text-zinc-400 text-xs">Add to your home screen</p>
         </div>
-        <button
-          onClick={() => { setDismissed(true) }}
-          className="text-zinc-600 p-1"
-          aria-label="Dismiss">
+        <button onClick={() => setDismissed(true)} className="text-zinc-600 p-1" aria-label="Dismiss">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
         <button
           onClick={async () => {
-            if (!installEvent?.prompt) return
             await installEvent.prompt()
             setInstallEvent(null)
           }}
@@ -86,17 +95,11 @@ export default function RegisterSW() {
           <div className="flex-1">
             <p className="text-white text-sm font-semibold">Install OnCue</p>
             <p className="text-zinc-400 text-xs mt-0.5">
-              Tap the <span className="text-white">Share</span> button{' '}
-              <svg className="inline w-3.5 h-3.5 mb-0.5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M12 2l-3 3h2v9h2V5h2l-3-3zm-7 7v12h14V9h-3v2h1v8H5V11h1V9H5z"/>
-              </svg>{' '}
-              then <span className="text-white">&ldquo;Add to Home Screen&rdquo;</span>
+              Tap the <span className="text-white">Share</span> button below, then{' '}
+              <span className="text-white">&ldquo;Add to Home Screen&rdquo;</span>
             </p>
           </div>
-          <button
-            onClick={() => setDismissed(true)}
-            className="text-zinc-600 p-1 shrink-0"
-            aria-label="Dismiss">
+          <button onClick={() => setDismissed(true)} className="text-zinc-600 p-1 shrink-0" aria-label="Dismiss">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>

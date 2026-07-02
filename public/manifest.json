@@ -1,8 +1,9 @@
 {
+  "id": "/",
   "name": "OnCue",
   "short_name": "OnCue",
   "description": "Worship team setlist",
-  "start_url": "/services",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
@@ -19,7 +20,7 @@
       "src": "/api/icon-512",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "maskable"
+      "purpose": "any maskable"
     }
   ]
 }
