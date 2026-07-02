@@ -17,15 +17,35 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-black flex items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-8">
-        <div className="text-center">
-          <h1 className="text-4xl font-bold text-white tracking-tight">OnCue</h1>
-          <p className="mt-2 text-zinc-400 text-sm">Worship team setlist</p>
+      <div className="w-full max-w-sm space-y-10">
+
+        {/* Logo mark */}
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative">
+            {/* Amber glow behind icon */}
+            <div className="absolute inset-0 rounded-3xl blur-2xl opacity-40 bg-amber-500 scale-110" />
+            <div className="relative w-20 h-20 bg-zinc-950 rounded-3xl border border-zinc-800 flex flex-col items-center justify-center gap-1.5 shadow-2xl">
+              <svg viewBox="0 0 32 32" className="w-8 h-8" fill="none">
+                <polygon points="8,6 26,16 8,26" fill="#F59E0B" />
+              </svg>
+              <div className="flex gap-1.5 items-center">
+                <div className="w-7 h-1 bg-amber-500 rounded-full" />
+                <div className="w-4 h-1 bg-amber-800 rounded-full" />
+                <div className="w-2.5 h-1 bg-amber-950 rounded-full" />
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center">
+            <h1 className="text-3xl font-bold text-white tracking-tight">OnCue</h1>
+            <p className="mt-1 text-zinc-500 text-sm tracking-wide uppercase text-xs">Worship Team Setlist</p>
+          </div>
         </div>
 
+        {/* Sign in */}
         <button
           onClick={handleGoogleSignIn}
-          className="w-full flex items-center justify-center gap-3 bg-white text-black font-semibold rounded-xl px-4 py-3.5 text-base active:scale-95 transition-transform"
+          className="w-full flex items-center justify-center gap-3 bg-white text-black font-semibold rounded-xl px-4 py-3.5 text-base active:scale-95 transition-transform shadow-lg"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -35,6 +55,7 @@ export default function LoginPage() {
           </svg>
           Sign in with Google
         </button>
+
       </div>
     </div>
   )

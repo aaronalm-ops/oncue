@@ -7,17 +7,27 @@ export function GET() {
     (
       <div style={{
         width: '100%', height: '100%',
-        background: '#000000',
+        background: '#0a0a0a',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        borderRadius: '38px',
+        borderRadius: '44px',
       }}>
-        <span style={{
-          color: '#ffffff',
-          fontSize: 80,
-          fontWeight: 700,
-          fontFamily: 'sans-serif',
-          letterSpacing: '-4px',
-        }}>OC</span>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+          {/* Play triangle */}
+          <span style={{
+            color: '#F59E0B',
+            fontSize: 78,
+            fontWeight: 900,
+            fontFamily: 'sans-serif',
+            lineHeight: 1,
+            marginBottom: 6,
+          }}>▶</span>
+          {/* Music bar lines */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div style={{ width: 36, height: 5, background: '#F59E0B', borderRadius: 3 }} />
+            <div style={{ width: 22, height: 5, background: '#78350F', borderRadius: 3 }} />
+            <div style={{ width: 14, height: 5, background: '#451a03', borderRadius: 3 }} />
+          </div>
+        </div>
       </div>
     ),
     { width: 192, height: 192 }
