@@ -47,7 +47,11 @@ export default async function ServicesPage() {
           </div>
         </div>
 
-        <ServicesClient services={services ?? []} isPrivileged={isPrivileged} />
+        <ServicesClient
+          services={services ?? []}
+          isPrivileged={isPrivileged}
+          todayStr={new Date().toISOString().slice(0, 10)}
+        />
       </div>
     </div>
   )

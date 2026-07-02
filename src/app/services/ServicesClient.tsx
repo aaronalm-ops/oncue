@@ -30,14 +30,21 @@ const DAY_ACCENT: Record<string, string> = {
 export default function ServicesClient({
   services,
   isPrivileged,
+  todayStr,
 }: {
   services: Service[]
   isPrivileged: boolean
+  todayStr: string
 }) {
   const [query, setQuery] = useState('')
   const [deleting, setDeleting] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [list, setList] = useState(services)
+
+  // Find the id of the next upcoming service (earliest date >= today, since list is desc)
+  const nextUpcomingId = [...list]
+    .filter(s => s.service_date >= todayStr)
+    .sort((a, b) => a.service_date.localeCompare(b.service_date))[0]?.id ?? null
 
   const filtered = query.trim()
     ? list.filter(s =>
@@ -93,6 +100,7 @@ export default function ServicesClient({
 
       {filtered.map(s => {
         const accent = DAY_ACCENT[s.day_of_week] ?? 'border-l-zinc-700'
+        const isNext = s.id === nextUpcomingId
         return (
           <div key={s.id}>
             {confirmDelete === s.id ? (
@@ -110,9 +118,16 @@ export default function ServicesClient({
                 </div>
               </div>
             ) : (
-              <div className={`flex items-center bg-zinc-900 rounded-xl overflow-hidden border-l-4 ${accent}`}>
+              <div className={`flex items-center bg-zinc-900 rounded-xl overflow-hidden border-l-4 ${accent} ${isNext ? 'ring-1 ring-purple-500/60 shadow-[0_0_16px_rgba(147,51,234,0.18)]' : ''}`}>
                 <Link href={`/services/${s.id}`} className="flex-1 px-4 py-4 min-w-0">
-                  <p className="font-semibold text-white leading-tight">{formatDate(s.service_date)}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-semibold text-white leading-tight">{formatDate(s.service_date)}</p>
+                    {isNext && (
+                      <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-600 text-white uppercase tracking-wide">
+                        Next up
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-zinc-500 mt-0.5 truncate">{s.source_filename}</p>
                 </Link>
 

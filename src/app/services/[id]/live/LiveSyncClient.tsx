@@ -45,13 +45,9 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     return supabaseRef.current
   }
 
-  function saveInstrumentPreference(instr: string) {
-    getClient().from('profiles').update({ instrument: instr }).eq('id', userId)
-  }
-
   function handleInstrumentChange(instr: string) {
     setViewInstrument(instr)
-    saveInstrumentPreference(instr)
+    getClient().from('profiles').update({ instrument: instr }).eq('id', userId)
   }
 
   type FlatItem = { songIdx: number; sectionIdx: number }
@@ -129,7 +125,6 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           }
           if (status === 'CLOSED') setSyncStatus('offline')
         })
-
       return channel
     }
 
@@ -166,26 +161,27 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   return (
     <div className={`min-h-screen ${bg} ${fg} flex flex-col select-none`}>
 
-      {/* Running order strip */}
-      <div className={`border-b ${borderB} shrink-0`}>
-        <div className="flex items-center gap-2 px-3 py-2 overflow-x-auto no-scrollbar">
+      {/* Running order — wraps to multiple lines so all songs stay visible */}
+      <div className={`border-b ${borderB} shrink-0 px-3 py-2`}>
+        <div className="flex flex-wrap gap-1.5 items-center">
           <Link href="/services"
             className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
             </svg>
           </Link>
+
           {songs.map((song, si) => {
             const isPast = si < songIdx
             const isActive = si === songIdx
-            const shortTitle = song.title.length > 13 ? song.title.slice(0, 13) + '…' : song.title
+            const shortTitle = song.title.length > 12 ? song.title.slice(0, 12) + '…' : song.title
             return (
               <button key={song.id} onClick={() => jumpToSong(si)}
-                className={`shrink-0 flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all active:scale-95 ${
+                className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-all active:scale-95 ${
                   isActive
                     ? (hc ? 'bg-black text-white' : 'bg-white text-black')
                     : isPast
-                      ? (hc ? 'bg-zinc-200 text-zinc-400 line-through' : 'bg-zinc-950 text-zinc-600')
+                      ? (hc ? 'bg-zinc-200 text-zinc-400' : 'bg-zinc-950 text-zinc-600')
                       : (hc ? 'bg-zinc-200 text-zinc-500' : 'bg-zinc-800 text-zinc-400')
                 }`}>
                 {shortTitle}
@@ -199,24 +195,42 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
             )
           })}
 
-          {/* Sync indicator */}
-          <div className="ml-auto shrink-0 flex items-center gap-1.5 pr-1">
+          {/* Sync status */}
+          <div className="flex items-center gap-1 ml-auto shrink-0">
             <div className={`w-1.5 h-1.5 rounded-full ${
               syncStatus === 'live' ? 'bg-green-500' :
-              syncStatus === 'reconnecting' ? 'bg-amber-400 animate-pulse' :
-              'bg-red-500'
+              syncStatus === 'reconnecting' ? 'bg-amber-400 animate-pulse' : 'bg-red-500'
             }`} />
             <span className={`text-[9px] font-medium ${dim}`}>
-              {syncStatus === 'live' ? 'LIVE' : syncStatus === 'reconnecting' ? 'SYNCING' : 'OFFLINE'}
+              {syncStatus === 'live' ? 'LIVE' : syncStatus === 'reconnecting' ? 'SYNC' : 'OFF'}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col px-4 pt-3 pb-32 max-w-2xl mx-auto w-full gap-3 overflow-y-auto">
+      {/* Floating fullscreen button */}
+      <button
+        onClick={toggleFullscreen}
+        className={`fixed right-3 z-20 w-8 h-8 rounded-full border flex items-center justify-center transition-colors active:scale-95 ${
+          hc ? 'bg-zinc-100 border-zinc-300 text-zinc-600' : 'bg-zinc-900/90 border-zinc-700 text-zinc-400 hover:text-white'
+        }`}
+        style={{ bottom: '130px' }}
+        aria-label="Toggle fullscreen"
+      >
+        {isFullscreen ? (
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9L4 4m0 0l5 0m-5 0l0 5M15 9l5-5m0 0l-5 0m5 0l0 5M9 15l-5 5m0 0l5 0m-5 0l0-5M15 15l5 5m0 0l-5 0m5 0l0-5" />
+          </svg>
+        ) : (
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+          </svg>
+        )}
+      </button>
 
-        {/* Song title + scale + YouTube */}
+      {/* Main content */}
+      <div className="flex-1 flex flex-col px-4 pt-3 pb-36 max-w-2xl mx-auto w-full gap-3 overflow-y-auto">
+
         <div className="flex items-center gap-2">
           <span className={`font-bold text-base leading-tight ${fg}`}>{currentSong?.title}</span>
           {currentSong?.scale && (
@@ -235,7 +249,6 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           )}
         </div>
 
-        {/* Section label */}
         <div className="flex items-center gap-2">
           <h3 className={`text-2xl font-black uppercase tracking-wide ${fg}`}>{currentSection?.label}</h3>
           {isMyIntro && (
@@ -243,7 +256,6 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           )}
         </div>
 
-        {/* My instrument — prominent */}
         {viewInstrument && (
           <div className={`rounded-2xl px-4 py-3.5 ${isMyIntro
             ? (hc ? 'border-2 border-orange-500 bg-orange-50' : 'border-2 border-orange-500 bg-zinc-900')
@@ -254,7 +266,6 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           </div>
         )}
 
-        {/* Other instruments — compact rows */}
         <div className="space-y-1.5">
           {currentSection?.instructions
             .filter(i => i.instrument !== viewInstrument)
@@ -266,13 +277,10 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
             ))}
         </div>
 
-        {/* Conductor notes — collapsible */}
         {currentSection?.comments && (
           <div>
-            <button
-              onClick={() => setNotesOpen(o => !o)}
-              className={`flex items-center gap-1.5 text-xs font-medium ${dim}`}
-            >
+            <button onClick={() => setNotesOpen(o => !o)}
+              className={`flex items-center gap-1.5 text-xs font-medium ${dim}`}>
               <svg className={`w-3.5 h-3.5 transition-transform ${notesOpen ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
@@ -286,7 +294,6 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           </div>
         )}
 
-        {/* Next preview */}
         {(nextSectionLabel || nextSongTitle) && (
           <p className={`text-xs ${dim}`}>
             Next: {nextSongTitle ? `${nextSongTitle} — ` : ''}{nextSectionLabel}
@@ -294,9 +301,9 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
         )}
       </div>
 
-      {/* Bottom controls */}
+      {/* Fixed bottom controls */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderB} ${bg} px-4 pt-2.5 pb-4`}>
-        {/* Instrument + stage selector */}
+        {/* Instrument selector */}
         <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto no-scrollbar">
           {instruments.map(instr => (
             <button key={instr} onClick={() => handleInstrumentChange(instr)}
@@ -308,16 +315,10 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
               {instr}
             </button>
           ))}
-          <div className="ml-auto flex gap-1.5 shrink-0">
-            <button onClick={toggleFullscreen}
-              className={`rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
-              {isFullscreen ? 'Exit FS' : 'Full'}
-            </button>
-            <button onClick={() => setHighContrast(h => !h)}
-              className={`rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
-              {hc ? 'Stage off' : 'Stage'}
-            </button>
-          </div>
+          <button onClick={() => setHighContrast(h => !h)}
+            className={`ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
+            {hc ? 'Stage off' : 'Stage'}
+          </button>
         </div>
 
         {/* Prev / Next */}

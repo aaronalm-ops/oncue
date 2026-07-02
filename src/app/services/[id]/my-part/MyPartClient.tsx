@@ -257,9 +257,9 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
 
   return (
     <div className={`min-h-screen ${bg} ${fg} flex flex-col`}>
-      {/* Running order strip */}
-      <div className={`border-b ${borderB} shrink-0`}>
-        <div className="flex items-center gap-2 px-3 py-2 overflow-x-auto no-scrollbar">
+      {/* Running order — wraps to multiple lines so all songs always visible */}
+      <div className={`border-b ${borderB} shrink-0 px-3 py-2`}>
+        <div className="flex flex-wrap gap-1.5 items-center">
           <Link href="/services"
             className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -269,28 +269,25 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
           {songs.map((song, si) => {
             const isPast = si < activeSongIdx
             const isActive = si === activeSongIdx
-            const shortTitle = song.title.length > 13 ? song.title.slice(0, 13) + '…' : song.title
+            const shortTitle = song.title.length > 12 ? song.title.slice(0, 12) + '…' : song.title
             return (
               <button key={song.id}
                 onClick={() => {
                   setActiveSongIdx(si)
                   if (layout === 'scroll') document.getElementById(`song-${si}`)?.scrollIntoView({ behavior: 'smooth' })
                 }}
-                className={`shrink-0 flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all active:scale-95 ${
+                className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-all active:scale-95 ${
                   isActive
                     ? (hc ? 'bg-black text-white' : 'bg-white text-black')
                     : isPast
-                      ? (hc ? 'bg-zinc-200 text-zinc-400 line-through' : 'bg-zinc-950 text-zinc-600')
+                      ? (hc ? 'bg-zinc-200 text-zinc-400' : 'bg-zinc-950 text-zinc-600')
                       : (hc ? 'bg-zinc-200 text-zinc-500' : 'bg-zinc-800 text-zinc-400')
                 }`}>
                 {shortTitle}
                 {song.scale && (
                   <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
-                    isActive
-                      ? 'bg-purple-600 text-white'
-                      : isPast
-                        ? (hc ? 'text-zinc-400' : 'text-zinc-700')
-                        : 'text-purple-400'
+                    isActive ? 'bg-purple-600 text-white' :
+                    isPast ? (hc ? 'text-zinc-400' : 'text-zinc-700') : 'text-purple-400'
                   }`}>{song.scale}</span>
                 )}
               </button>
@@ -299,22 +296,30 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
         </div>
       </div>
 
+      {/* Floating fullscreen button */}
+      <button
+        onClick={toggleFullscreen}
+        className={`fixed right-3 z-20 w-8 h-8 rounded-full border flex items-center justify-center active:scale-95 transition-colors ${
+          hc ? 'bg-zinc-100 border-zinc-300 text-zinc-600' : 'bg-zinc-900/90 border-zinc-700 text-zinc-400 hover:text-white'
+        }`}
+        style={{ bottom: '140px' }}
+        aria-label="Toggle fullscreen"
+      >
+        {isFullscreen ? (
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9L4 4m0 0l5 0m-5 0l0 5M15 9l5-5m0 0l-5 0m5 0l0 5M9 15l-5 5m0 0l5 0m-5 0l0-5M15 15l5 5m0 0l-5 0m5 0l0-5" />
+          </svg>
+        ) : (
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+          </svg>
+        )}
+      </button>
+
       {/* Content */}
-      <div className="flex-1 px-4 pt-3 pb-32 max-w-2xl mx-auto w-full overflow-y-auto">
+      <div className="flex-1 px-4 pt-3 pb-36 max-w-2xl mx-auto w-full overflow-y-auto">
         {layout === 'song' ? (
-          <div className="space-y-2">
-            <SongBlock song={activeSong} {...sharedProps} />
-            <div className="flex gap-3 pt-2">
-              <button onClick={() => setActiveSongIdx(i => Math.max(0, i - 1))} disabled={activeSongIdx === 0}
-                className={`flex-1 rounded-xl py-3 font-semibold text-sm disabled:opacity-30 active:scale-95 transition-transform ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
-                ← Prev
-              </button>
-              <button onClick={() => setActiveSongIdx(i => Math.min(songs.length - 1, i + 1))} disabled={activeSongIdx === songs.length - 1}
-                className={`flex-1 rounded-xl py-3 font-semibold text-sm disabled:opacity-30 active:scale-95 transition-transform ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
-                Next →
-              </button>
-            </div>
-          </div>
+          <SongBlock song={activeSong} {...sharedProps} />
         ) : (
           <div className="space-y-6">
             {songs.map((song, si) => (
@@ -326,9 +331,10 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
         )}
       </div>
 
-      {/* Bottom bar */}
+      {/* Fixed bottom bar */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderB} ${bg} px-4 pt-2.5 pb-4`}>
-        <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto">
+        {/* Instruments + stage */}
+        <div className="flex items-center gap-1.5 mb-2 overflow-x-auto no-scrollbar">
           {instruments.map(instr => (
             <button key={instr} onClick={() => handleInstrumentChange(instr)}
               className={`shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
@@ -339,26 +345,39 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
               {instr}
             </button>
           ))}
-          <div className="ml-auto flex gap-1.5 shrink-0">
-            <button onClick={toggleFullscreen}
-              className={`rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
-              {isFullscreen ? 'Exit FS' : 'Full'}
-            </button>
-            <button onClick={() => setHighContrast(h => !h)}
-              className={`rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
-              {hc ? 'Stage off' : 'Stage'}
-            </button>
-          </div>
+          <button onClick={() => setHighContrast(h => !h)}
+            className={`ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
+            {hc ? 'Stage off' : 'Stage'}
+          </button>
         </div>
 
-        <div className="flex gap-3">
-          <button onClick={() => setLayout('song')}
-            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all active:scale-95 ${layout === 'song' ? (hc ? 'bg-black text-white' : 'bg-white text-black') : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')}`}>
-            Song by song
+        {/* Prev / layout toggle / Next — always fixed */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setActiveSongIdx(i => Math.max(0, i - 1))}
+            disabled={activeSongIdx === 0}
+            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold disabled:opacity-30 active:scale-95 transition-all ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
+            ← Prev
           </button>
-          <button onClick={() => setLayout('scroll')}
-            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition-all active:scale-95 ${layout === 'scroll' ? (hc ? 'bg-black text-white' : 'bg-white text-black') : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')}`}>
-            All on one page
+          <button
+            onClick={() => setLayout(l => l === 'song' ? 'scroll' : 'song')}
+            className={`rounded-xl px-3 py-2.5 text-[10px] font-bold uppercase tracking-wide active:scale-95 transition-all ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}
+            title={layout === 'song' ? 'Switch to scroll view' : 'Switch to song view'}>
+            {layout === 'song' ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveSongIdx(i => Math.min(songs.length - 1, i + 1))}
+            disabled={activeSongIdx === songs.length - 1}
+            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold disabled:opacity-30 active:scale-95 transition-all ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
+            Next →
           </button>
         </div>
       </div>
