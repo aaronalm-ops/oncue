@@ -1,14 +1,29 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+// Paths that must always be public — no auth check, no redirect.
+// Matcher regex alone isn't reliable for file exclusions; check explicitly.
+const PUBLIC_PATHS = ['/manifest.json', '/sw.js', '/dcc-logo.png']
+
 export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
+  const { pathname } = request.nextUrl
+
+  // Always allow public PWA files, auth routes, API routes, and static assets
+  if (
+    PUBLIC_PATHS.includes(pathname) ||
+    pathname.startsWith('/auth') ||
+    pathname.startsWith('/api') ||
+    pathname.startsWith('/_next') ||
+    /\.(svg|png|jpg|jpeg|gif|webp|ico|woff2?|txt|xml)$/i.test(pathname)
+  ) {
+    return NextResponse.next()
+  }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !supabaseKey) return NextResponse.next()
 
-  if (!supabaseUrl || !supabaseKey) return supabaseResponse
-
+  let supabaseResponse = NextResponse.next({ request })
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
       getAll() { return request.cookies.getAll() },
@@ -24,12 +39,6 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const { pathname } = request.nextUrl
-
-  // Allow auth routes and API routes through
-  if (pathname.startsWith('/auth') || pathname.startsWith('/api')) return supabaseResponse
-
-  // Redirect unauthenticated users to login
   if (!user) {
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
@@ -40,11 +49,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Exclude static/public files that must be accessible without auth:
-  // sw.js (service worker), manifest.json (PWA manifest), and common static assets.
-  // SW's cache.addAll runs without user cookies — if these hit auth middleware they 302
-  // and abort the SW install entirely, breaking PWA installability.
-  matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|sw\\.js|manifest\\.json|dcc-logo\\.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)',
-  ],
+  matcher: ['/((?!_next/static|_next/image|favicon\\.ico).*)'],
 }
