@@ -121,24 +121,38 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
     <div className={`min-h-screen ${bg} ${fg} flex flex-col select-none`}>
 
       {/* Running order strip */}
-      <div className={`border-b ${borderB} overflow-x-auto shrink-0`}>
-        <div className="flex gap-2 px-4 py-2.5 min-w-max">
-          <Link href="/services" className={`shrink-0 rounded-lg px-3 py-1 text-xs font-medium flex items-center gap-1 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div className={`border-b ${borderB} px-4 py-2.5 shrink-0`}>
+        <div className="flex items-center gap-1.5">
+          <Link href="/services"
+            className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
             </svg>
           </Link>
-          {songs.map((song, si) => (
-            <button key={song.id} onClick={() => jumpToSong(si)}
-              className={`shrink-0 rounded-lg px-3 py-1 text-xs font-medium transition-all active:scale-95 ${
-                si === songIdx
-                  ? (hc ? 'bg-black text-white' : 'bg-white text-black')
-                  : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
-              }`}>
-              {song.title.length > 16 ? song.title.slice(0, 16) + '…' : song.title}
-            </button>
-          ))}
+          <div className="flex gap-1 flex-1 overflow-x-auto no-scrollbar">
+            {songs.map((song, si) => {
+              const isPast = si < songIdx
+              const isActive = si === songIdx
+              return (
+                <button key={song.id} onClick={() => jumpToSong(si)}
+                  className={`shrink-0 w-7 h-7 rounded-lg text-xs font-bold transition-all active:scale-90 ${
+                    isActive
+                      ? (hc ? 'bg-black text-white' : 'bg-white text-black')
+                      : isPast
+                        ? (hc ? 'bg-zinc-300 text-zinc-500' : 'bg-zinc-900 text-zinc-600')
+                        : (hc ? 'bg-zinc-200 text-zinc-500' : 'bg-zinc-800 text-zinc-500')
+                  }`}>
+                  {si + 1}
+                </button>
+              )
+            })}
+          </div>
+          <span className={`text-xs shrink-0 ${dim}`}>{currentFlatIdx + 1}/{flatList.length}</span>
         </div>
+        <p className={`text-xs font-semibold mt-1.5 truncate ${fg}`}>
+          {currentSong?.title}
+          {currentSong?.scale && <span className={`ml-1.5 font-normal ${dim}`}>{currentSong.scale}</span>}
+        </p>
       </div>
 
       {/* Main content */}
@@ -274,10 +288,6 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
           </button>
         </div>
 
-        <div className="flex justify-between items-center mt-2">
-          <Link href={`/services/${serviceId}`} className={`text-xs ${dim}`}>← Back</Link>
-          <span className={`text-xs ${dim}`}>{currentFlatIdx + 1} / {flatList.length}</span>
-        </div>
       </div>
     </div>
   )
