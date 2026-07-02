@@ -10,6 +10,7 @@ interface Song { id: string; order_index: number; title: string; scale: string |
 
 interface Props {
   serviceId: string
+  userId: string
   songs: Song[]
   instruments: string[]
   userInstrument: string | null
@@ -17,14 +18,16 @@ interface Props {
   initialSectionIndex: number
 }
 
-export default function LiveSyncClient({ serviceId, songs, instruments, userInstrument, initialSongIndex, initialSectionIndex }: Props) {
+export default function LiveSyncClient({ serviceId, userId, songs, instruments, userInstrument, initialSongIndex, initialSectionIndex }: Props) {
   const [songIdx, setSongIdx] = useState(initialSongIndex)
   const [sectionIdx, setSectionIdx] = useState(initialSectionIndex)
   const [highContrast, setHighContrast] = useState(false)
-  const [viewInstrument, setViewInstrument] = useState(userInstrument)
+  const [viewInstrument, setViewInstrument] = useState(userInstrument ?? instruments[0] ?? null)
   const [notesOpen, setNotesOpen] = useState(false)
   const [pressing, setPressing] = useState<'prev' | 'next' | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<'live' | 'reconnecting' | 'offline'>('live')
 
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
@@ -42,6 +45,15 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
     return supabaseRef.current
   }
 
+  function saveInstrumentPreference(instr: string) {
+    getClient().from('profiles').update({ instrument: instr }).eq('id', userId)
+  }
+
+  function handleInstrumentChange(instr: string) {
+    setViewInstrument(instr)
+    saveInstrumentPreference(instr)
+  }
+
   type FlatItem = { songIdx: number; sectionIdx: number }
   const flatList: FlatItem[] = []
   songs.forEach((song, si) => {
@@ -53,17 +65,19 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
   const currentSong = songs[Math.min(songIdx, songs.length - 1)]
   const currentSection = currentSong?.sections[Math.min(sectionIdx, (currentSong?.sections.length ?? 1) - 1)]
 
-  function pushState(newSongIdx: number, newSectionIdx: number) {
-    getClient().from('session_state').upsert({
+  async function pushState(newSongIdx: number, newSectionIdx: number) {
+    setIsSaving(true)
+    await getClient().from('session_state').upsert({
       service_id: serviceId,
       current_song_index: newSongIdx,
       current_section_index: newSectionIdx,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'service_id' })
+    setIsSaving(false)
   }
 
   function goNext() {
-    if (!nextFlat) return
+    if (!nextFlat || isSaving) return
     setSongIdx(nextFlat.songIdx)
     setSectionIdx(nextFlat.sectionIdx)
     setNotesOpen(false)
@@ -71,7 +85,7 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
   }
 
   function goPrev() {
-    if (currentFlatIdx <= 0) return
+    if (currentFlatIdx <= 0 || isSaving) return
     const prev = flatList[currentFlatIdx - 1]
     setSongIdx(prev.songIdx)
     setSectionIdx(prev.sectionIdx)
@@ -87,22 +101,54 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
   }
 
   useEffect(() => {
-    const channel = getClient()
-      .channel(`session:${serviceId}`)
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'session_state',
-        filter: `service_id=eq.${serviceId}`,
-      }, payload => {
-        const { current_song_index, current_section_index } = payload.new as { current_song_index: number; current_section_index: number }
-        setSongIdx(current_song_index)
-        setSectionIdx(current_section_index)
-        setNotesOpen(false)
-      })
-      .subscribe()
-    return () => { getClient().removeChannel(channel) }
+    let retryTimeout: ReturnType<typeof setTimeout>
+
+    function subscribe() {
+      const channel = getClient()
+        .channel(`session:${serviceId}`)
+        .on('postgres_changes', {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'session_state',
+          filter: `service_id=eq.${serviceId}`,
+        }, payload => {
+          const { current_song_index, current_section_index } = payload.new as { current_song_index: number; current_section_index: number }
+          setSongIdx(current_song_index)
+          setSectionIdx(current_section_index)
+          setNotesOpen(false)
+          setSyncStatus('live')
+        })
+        .subscribe(status => {
+          if (status === 'SUBSCRIBED') setSyncStatus('live')
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setSyncStatus('reconnecting')
+            retryTimeout = setTimeout(() => {
+              getClient().removeChannel(channel)
+              subscribe()
+            }, 3000)
+          }
+          if (status === 'CLOSED') setSyncStatus('offline')
+        })
+
+      return channel
+    }
+
+    const channel = subscribe()
+    return () => {
+      clearTimeout(retryTimeout)
+      getClient().removeChannel(channel)
+    }
   }, [serviceId])
+
+  if (songs.length === 0) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-white font-semibold">No songs found in this service.</p>
+        <p className="text-zinc-500 text-sm">The chart may have been parsed incorrectly. Delete it and re-upload.</p>
+        <Link href="/services" className="text-purple-400 text-sm mt-2">← Back to services</Link>
+      </div>
+    )
+  }
 
   const myInstruction = currentSection?.instructions.find(i => i.instrument === viewInstrument)
   const isMyIntro = myInstruction?.is_intro ?? false
@@ -145,16 +191,25 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
                 {shortTitle}
                 {song.scale && (
                   <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
-                    isActive
-                      ? 'bg-purple-600 text-white'
-                      : isPast
-                        ? (hc ? 'text-zinc-400' : 'text-zinc-700')
-                        : 'text-purple-400'
+                    isActive ? 'bg-purple-600 text-white' :
+                    isPast ? (hc ? 'text-zinc-400' : 'text-zinc-700') : 'text-purple-400'
                   }`}>{song.scale}</span>
                 )}
               </button>
             )
           })}
+
+          {/* Sync indicator */}
+          <div className="ml-auto shrink-0 flex items-center gap-1.5 pr-1">
+            <div className={`w-1.5 h-1.5 rounded-full ${
+              syncStatus === 'live' ? 'bg-green-500' :
+              syncStatus === 'reconnecting' ? 'bg-amber-400 animate-pulse' :
+              'bg-red-500'
+            }`} />
+            <span className={`text-[9px] font-medium ${dim}`}>
+              {syncStatus === 'live' ? 'LIVE' : syncStatus === 'reconnecting' ? 'SYNCING' : 'OFFLINE'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -189,13 +244,13 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
         </div>
 
         {/* My instrument — prominent */}
-        {myInstruction && (
+        {viewInstrument && (
           <div className={`rounded-2xl px-4 py-3.5 ${isMyIntro
             ? (hc ? 'border-2 border-orange-500 bg-orange-50' : 'border-2 border-orange-500 bg-zinc-900')
             : cardBg
           }`}>
             <p className={`text-[10px] font-semibold uppercase tracking-widest mb-1.5 ${dim}`}>{viewInstrument}</p>
-            <p className={`text-base font-semibold leading-snug ${fg}`}>{myInstruction.text || '—'}</p>
+            <p className={`text-base font-semibold leading-snug ${fg}`}>{myInstruction?.text || '—'}</p>
           </div>
         )}
 
@@ -242,9 +297,9 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
       {/* Bottom controls */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderB} ${bg} px-4 pt-2.5 pb-4`}>
         {/* Instrument + stage selector */}
-        <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto">
+        <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto no-scrollbar">
           {instruments.map(instr => (
-            <button key={instr} onClick={() => setViewInstrument(instr)}
+            <button key={instr} onClick={() => handleInstrumentChange(instr)}
               className={`shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
                 instr === viewInstrument
                   ? (hc ? 'bg-black text-white' : 'bg-white text-black')
@@ -271,7 +326,7 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
             onPointerDown={() => setPressing('prev')}
             onPointerUp={() => { setPressing(null); goPrev() }}
             onPointerLeave={() => setPressing(null)}
-            disabled={currentFlatIdx <= 0}
+            disabled={currentFlatIdx <= 0 || isSaving}
             className={`flex-1 rounded-xl py-3.5 font-semibold text-base disabled:opacity-30 transition-transform ${
               pressing === 'prev' ? 'scale-95' : 'scale-100'
             } ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}
@@ -282,7 +337,7 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
             onPointerDown={() => setPressing('next')}
             onPointerUp={() => { setPressing(null); goNext() }}
             onPointerLeave={() => setPressing(null)}
-            disabled={!nextFlat}
+            disabled={!nextFlat || isSaving}
             className={`flex-1 rounded-xl py-3.5 font-bold text-base disabled:opacity-30 transition-transform ${
               pressing === 'next' ? 'scale-95' : 'scale-100'
             } ${hc ? 'bg-black text-white' : 'bg-white text-black'}`}
@@ -290,7 +345,6 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
             Next
           </button>
         </div>
-
       </div>
     </div>
   )

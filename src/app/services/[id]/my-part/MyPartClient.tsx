@@ -19,11 +19,12 @@ interface Props {
 }
 
 // Extracted to top-level so it never remounts on parent re-render
-function NoteEditor({ initialValue, onSave, onCancel, hc }: {
+function NoteEditor({ initialValue, onSave, onCancel, hc, saving }: {
   initialValue: string
   onSave: (text: string) => void
   onCancel: () => void
   hc: boolean
+  saving: boolean
 }) {
   const [draft, setDraft] = useState(initialValue)
   return (
@@ -39,8 +40,10 @@ function NoteEditor({ initialValue, onSave, onCancel, hc }: {
         autoFocus
       />
       <div className="flex gap-2">
-        <button onClick={() => onSave(draft)}
-          className="text-[10px] font-semibold px-3 py-1 rounded-lg bg-white text-black">Save</button>
+        <button onClick={() => onSave(draft)} disabled={saving}
+          className="text-[10px] font-semibold px-3 py-1 rounded-lg bg-white text-black disabled:opacity-50">
+          {saving ? 'Saving…' : 'Save'}
+        </button>
         <button onClick={onCancel}
           className={`text-[10px] font-semibold px-3 py-1 rounded-lg ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-zinc-300'}`}>Cancel</button>
       </div>
@@ -49,13 +52,14 @@ function NoteEditor({ initialValue, onSave, onCancel, hc }: {
 }
 
 function SectionCard({ section, viewInstrument, hc, fg, dim, cardBg, note, isEditing, noteExpanded,
-  onToggleNote, onStartEdit, onSaveNote, onCancelEdit }: {
+  saving, onToggleNote, onStartEdit, onSaveNote, onCancelEdit }: {
   section: Section
   viewInstrument: string
   hc: boolean; fg: string; dim: string; cardBg: string
   note: string | undefined
   isEditing: boolean
   noteExpanded: boolean
+  saving: boolean
   onToggleNote: () => void
   onStartEdit: () => void
   onSaveNote: (text: string) => void
@@ -95,6 +99,7 @@ function SectionCard({ section, viewInstrument, hc, fg, dim, cardBg, note, isEdi
           onSave={onSaveNote}
           onCancel={onCancelEdit}
           hc={hc}
+          saving={saving}
         />
       ) : (
         <button
@@ -112,13 +117,14 @@ function SectionCard({ section, viewInstrument, hc, fg, dim, cardBg, note, isEdi
 }
 
 function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNote, openNotes,
-  onToggleNote, onStartEdit, onSaveNote, onCancelEdit, compact }: {
+  saving, onToggleNote, onStartEdit, onSaveNote, onCancelEdit, compact }: {
   song: Song
   viewInstrument: string
   hc: boolean; fg: string; dim: string; cardBg: string
   notes: Record<string, string>
   editingNote: string | null
   openNotes: Record<string, boolean>
+  saving: boolean
   onToggleNote: (sectionId: string) => void
   onStartEdit: (key: string) => void
   onSaveNote: (sectionId: string, text: string) => void
@@ -155,6 +161,7 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
             note={notes[key]}
             isEditing={editingNote === key}
             noteExpanded={openNotes[section.id] ?? false}
+            saving={saving}
             onToggleNote={() => onToggleNote(section.id)}
             onStartEdit={() => onStartEdit(key)}
             onSaveNote={(text) => onSaveNote(section.id, text)}
@@ -176,6 +183,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     Object.fromEntries(initialNotes.map(n => [`${n.section_id}:${n.instrument}`, n.note_text]))
   )
   const [editingNote, setEditingNote] = useState<string | null>(null)
+  const [savingNote, setSavingNote] = useState(false)
   const [openNotes, setOpenNotes] = useState<Record<string, boolean>>({})
 
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
@@ -194,9 +202,15 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     }
   }
 
+  function handleInstrumentChange(instr: string) {
+    setViewInstrument(instr)
+    getClient().from('profiles').update({ instrument: instr }).eq('id', userId)
+  }
+
   async function saveNote(sectionId: string, text: string) {
     const key = `${sectionId}:${viewInstrument}`
     const trimmed = text.trim()
+    setSavingNote(true)
     if (trimmed) {
       await getClient().from('user_notes').upsert({
         user_id: userId, section_id: sectionId, instrument: viewInstrument, note_text: trimmed,
@@ -207,6 +221,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
         .eq('user_id', userId).eq('section_id', sectionId).eq('instrument', viewInstrument)
       setNotes(prev => { const n = { ...prev }; delete n[key]; return n })
     }
+    setSavingNote(false)
     setEditingNote(null)
   }
 
@@ -217,12 +232,23 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   const cardBg = hc ? 'bg-zinc-100 border border-zinc-200' : 'bg-zinc-900'
   const borderB = hc ? 'border-zinc-300' : 'border-zinc-800'
 
+  if (songs.length === 0) {
+    return (
+      <div className={`min-h-screen ${bg} flex flex-col items-center justify-center gap-4 px-6 text-center`}>
+        <p className={`font-semibold ${fg}`}>No songs found in this service.</p>
+        <p className={dim + ' text-sm'}>The chart may have been parsed incorrectly. Delete it and re-upload.</p>
+        <a href="/services" className="text-purple-400 text-sm mt-2">← Back to services</a>
+      </div>
+    )
+  }
+
   const activeSong = songs[activeSongIdx]
 
   const sharedProps = {
     viewInstrument,
     hc, fg, dim, cardBg,
     notes, editingNote, openNotes,
+    saving: savingNote,
     onToggleNote: (sectionId: string) => setOpenNotes(prev => ({ ...prev, [sectionId]: !prev[sectionId] })),
     onStartEdit: (key: string) => setEditingNote(key),
     onSaveNote: saveNote,
@@ -304,7 +330,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderB} ${bg} px-4 pt-2.5 pb-4`}>
         <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto">
           {instruments.map(instr => (
-            <button key={instr} onClick={() => setViewInstrument(instr)}
+            <button key={instr} onClick={() => handleInstrumentChange(instr)}
               className={`shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
                 instr === viewInstrument
                   ? (hc ? 'bg-black text-white' : 'bg-white text-black')

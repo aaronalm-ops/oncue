@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import UploadButton from '@/components/UploadButton'
+import UserMenu from '@/components/UserMenu'
 import ServicesClient from './ServicesClient'
 
 export default async function ServicesPage() {
@@ -7,7 +8,7 @@ export default async function ServicesPage() {
 
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase
-    .from('profiles').select('role').eq('id', user!.id).single()
+    .from('profiles').select('role, instrument').eq('id', user!.id).single()
   const role = (profile?.role ?? 'member') as 'master' | 'admin' | 'member'
   const isPrivileged = role === 'master' || role === 'admin'
 
@@ -23,7 +24,6 @@ export default async function ServicesPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
-            {/* Purple play mark */}
             <div className="w-9 h-9 bg-zinc-950 rounded-xl border border-purple-900/40 flex flex-col items-center justify-center gap-0.5">
               <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none">
                 <polygon points="4,3 13,8 4,13" fill="#9333EA" />
@@ -36,9 +36,9 @@ export default async function ServicesPage() {
             <h1 className="text-xl font-bold tracking-tight">OnCue</h1>
           </div>
 
-          {/* Right: DCC logo + optional upload */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             {isPrivileged && <UploadButton />}
+            <UserMenu instrument={profile?.instrument ?? null} />
             <img
               src="/dcc-logo.png"
               alt="DCC"

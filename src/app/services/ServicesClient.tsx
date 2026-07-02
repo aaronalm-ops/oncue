@@ -46,10 +46,12 @@ export default function ServicesClient({
       )
     : list
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string, filename: string) {
     setDeleting(id)
     const supabase = createClient()
     await supabase.from('services').delete().eq('id', id)
+    // Best-effort: clean up the file from Storage (don't fail if it errors)
+    supabase.storage.from('charts').remove([`${id}/${filename}`]).catch(() => {})
     setList(prev => prev.filter(s => s.id !== id))
     setConfirmDelete(null)
     setDeleting(null)
@@ -101,7 +103,7 @@ export default function ServicesClient({
                     className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-zinc-700 text-white active:scale-95 transition-transform">
                     Cancel
                   </button>
-                  <button onClick={() => handleDelete(s.id)} disabled={deleting === s.id}
+                  <button onClick={() => handleDelete(s.id, s.source_filename)} disabled={deleting === s.id}
                     className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-red-600 text-white disabled:opacity-50 active:scale-95 transition-transform">
                     {deleting === s.id ? 'Deleting…' : 'Delete'}
                   </button>

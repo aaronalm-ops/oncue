@@ -42,7 +42,6 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
       })),
   }))
 
-  // Fetch user notes for this service's sections
   const sectionIds = sortedSongs.flatMap(s => s.sections.map(sec => sec.id))
   const { data: notes } = sectionIds.length
     ? await supabase
@@ -52,12 +51,18 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
         .in('section_id', sectionIds)
     : { data: [] }
 
+  // Validate user's preferred instrument against what this service actually has
+  const profileInstrument = profile?.instrument ?? null
+  const validatedInstrument = profileInstrument && service.instruments.includes(profileInstrument)
+    ? profileInstrument
+    : (service.instruments[0] ?? null)
+
   return (
     <MyPartClient
       serviceId={id}
       songs={sortedSongs}
       instruments={service.instruments}
-      userInstrument={profile?.instrument ?? null}
+      userInstrument={validatedInstrument}
       userId={user!.id}
       initialNotes={notes ?? []}
     />

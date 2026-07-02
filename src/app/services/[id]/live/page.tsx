@@ -13,7 +13,6 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
     .eq('id', user!.id)
     .single()
 
-  // Fetch full service data
   const { data: service } = await supabase
     .from('services')
     .select('id, service_date, day_of_week, instruments')
@@ -33,7 +32,6 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
     .eq('service_id', id)
     .order('order_index')
 
-  // Sort sections and instructions
   const sortedSongs = (songs ?? []).map(song => ({
     ...song,
     sections: (song.sections ?? [])
@@ -50,12 +48,19 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
     .eq('service_id', id)
     .single()
 
+  // Validate user's preferred instrument against what this service actually has
+  const profileInstrument = profile?.instrument ?? null
+  const validatedInstrument = profileInstrument && service.instruments.includes(profileInstrument)
+    ? profileInstrument
+    : (service.instruments[0] ?? null)
+
   return (
     <LiveSyncClient
       serviceId={id}
+      userId={user!.id}
       songs={sortedSongs}
       instruments={service.instruments}
-      userInstrument={profile?.instrument ?? null}
+      userInstrument={validatedInstrument}
       initialSongIndex={sessionState?.current_song_index ?? 0}
       initialSectionIndex={sessionState?.current_section_index ?? 0}
     />
