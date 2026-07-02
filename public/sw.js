@@ -1,4 +1,4 @@
-const CACHE = 'oncue-v2'
+const CACHE = 'oncue-v3'
 
 self.addEventListener('install', e => {
   // Pre-cache only static assets — NOT pages (they require auth and return 302s
