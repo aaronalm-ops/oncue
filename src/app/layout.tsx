@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import { Geist } from 'next/font/google'
 import './globals.css'
+import RegisterSW from '@/components/RegisterSW'
 
 const geist = Geist({ subsets: ['latin'], variable: '--font-geist' })
 
@@ -8,7 +9,14 @@ export const metadata: Metadata = {
   title: 'OnCue',
   description: 'Worship team setlist',
   manifest: '/manifest.json',
-  appleWebApp: { capable: true, statusBarStyle: 'black-translucent', title: 'OnCue' },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'OnCue',
+  },
+  icons: {
+    apple: '/icon-192.png',
+  },
 }
 
 export const viewport: Viewport = {
@@ -22,7 +30,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${geist.variable} h-full`}>
-      <body className="min-h-full font-sans antialiased">{children}</body>
+      <body className="min-h-full font-sans antialiased">
+        <RegisterSW />
+        {children}
+      </body>
     </html>
   )
 }
