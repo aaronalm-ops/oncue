@@ -256,7 +256,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   }
 
   return (
-    <div className={`min-h-screen ${bg} ${fg} flex flex-col`}>
+    <div className={`h-screen overflow-hidden ${bg} ${fg} flex flex-col`}>
       {/* Running order — wraps to multiple lines so all songs always visible */}
       <div className={`border-b ${borderB} shrink-0 px-3 py-2`}>
         <div className="flex flex-wrap gap-1.5 items-center">

@@ -159,7 +159,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   const borderB = hc ? 'border-zinc-300' : 'border-zinc-800'
 
   return (
-    <div className={`min-h-screen ${bg} ${fg} flex flex-col select-none`}>
+    <div className={`h-screen overflow-hidden ${bg} ${fg} flex flex-col select-none`}>
 
       {/* Running order — wraps to multiple lines so all songs stay visible */}
       <div className={`border-b ${borderB} shrink-0 px-3 py-2`}>
