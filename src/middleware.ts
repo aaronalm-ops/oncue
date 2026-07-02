@@ -40,5 +40,11 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  // Exclude static/public files that must be accessible without auth:
+  // sw.js (service worker), manifest.json (PWA manifest), and common static assets.
+  // SW's cache.addAll runs without user cookies — if these hit auth middleware they 302
+  // and abort the SW install entirely, breaking PWA installability.
+  matcher: [
+    '/((?!_next/static|_next/image|favicon\\.ico|sw\\.js|manifest\\.json|dcc-logo\\.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)',
+  ],
 }
