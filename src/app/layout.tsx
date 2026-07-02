@@ -15,8 +15,8 @@ export const metadata: Metadata = {
     title: 'OnCue',
   },
   icons: {
-    apple: '/dcc-logo.png',
-    icon: '/dcc-logo.png',
+    apple: '/api/icon-192',
+    icon: '/api/icon-192',
   },
 }
 
