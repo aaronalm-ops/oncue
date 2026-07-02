@@ -121,38 +121,41 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
     <div className={`min-h-screen ${bg} ${fg} flex flex-col select-none`}>
 
       {/* Running order strip */}
-      <div className={`border-b ${borderB} px-4 py-2.5 shrink-0`}>
-        <div className="flex items-center gap-1.5">
+      <div className={`border-b ${borderB} shrink-0`}>
+        <div className="flex items-center gap-2 px-3 py-2 overflow-x-auto no-scrollbar">
           <Link href="/services"
             className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
             </svg>
           </Link>
-          <div className="flex gap-1 flex-1 overflow-x-auto no-scrollbar">
-            {songs.map((song, si) => {
-              const isPast = si < songIdx
-              const isActive = si === songIdx
-              return (
-                <button key={song.id} onClick={() => jumpToSong(si)}
-                  className={`shrink-0 w-7 h-7 rounded-lg text-xs font-bold transition-all active:scale-90 ${
+          {songs.map((song, si) => {
+            const isPast = si < songIdx
+            const isActive = si === songIdx
+            const shortTitle = song.title.length > 13 ? song.title.slice(0, 13) + '…' : song.title
+            return (
+              <button key={song.id} onClick={() => jumpToSong(si)}
+                className={`shrink-0 flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all active:scale-95 ${
+                  isActive
+                    ? (hc ? 'bg-black text-white' : 'bg-white text-black')
+                    : isPast
+                      ? (hc ? 'bg-zinc-200 text-zinc-400 line-through' : 'bg-zinc-950 text-zinc-600')
+                      : (hc ? 'bg-zinc-200 text-zinc-500' : 'bg-zinc-800 text-zinc-400')
+                }`}>
+                {shortTitle}
+                {song.scale && (
+                  <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
                     isActive
-                      ? (hc ? 'bg-black text-white' : 'bg-white text-black')
+                      ? 'bg-purple-600 text-white'
                       : isPast
-                        ? (hc ? 'bg-zinc-300 text-zinc-500' : 'bg-zinc-900 text-zinc-600')
-                        : (hc ? 'bg-zinc-200 text-zinc-500' : 'bg-zinc-800 text-zinc-500')
-                  }`}>
-                  {si + 1}
-                </button>
-              )
-            })}
-          </div>
-          <span className={`text-xs shrink-0 ${dim}`}>{currentFlatIdx + 1}/{flatList.length}</span>
+                        ? (hc ? 'text-zinc-400' : 'text-zinc-700')
+                        : 'text-purple-400'
+                  }`}>{song.scale}</span>
+                )}
+              </button>
+            )
+          })}
         </div>
-        <p className={`text-xs font-semibold mt-1.5 truncate ${fg}`}>
-          {currentSong?.title}
-          {currentSong?.scale && <span className={`ml-1.5 font-normal ${dim}`}>{currentSong.scale}</span>}
-        </p>
       </div>
 
       {/* Main content */}
@@ -162,7 +165,7 @@ export default function LiveSyncClient({ serviceId, songs, instruments, userInst
         <div className="flex items-center gap-2">
           <span className={`font-bold text-base leading-tight ${fg}`}>{currentSong?.title}</span>
           {currentSong?.scale && (
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-md shrink-0 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-300'}`}>
+            <span className={`text-sm font-black px-2.5 py-0.5 rounded-lg shrink-0 ${hc ? 'bg-black text-white' : 'bg-purple-600 text-white'}`}>
               {currentSong.scale}
             </span>
           )}
