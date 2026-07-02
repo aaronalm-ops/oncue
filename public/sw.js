@@ -1,12 +1,9 @@
-const CACHE = 'oncue-v5'
+const CACHE = 'oncue-v6'
 
 self.addEventListener('install', e => {
-  // Only pre-cache truly static files with guaranteed 200 responses.
-  // Dynamic routes (/api/*) are excluded — any non-200 in cache.addAll
-  // throws and aborts the entire SW install.
   e.waitUntil(
     caches.open(CACHE).then(cache =>
-      cache.addAll(['/manifest.json', '/dcc-logo.png'])
+      cache.addAll(['/manifest.webmanifest', '/dcc-logo.png'])
     )
   )
   self.skipWaiting()

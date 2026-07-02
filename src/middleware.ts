@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 // Paths that must always be public — no auth check, no redirect.
 // Matcher regex alone isn't reliable for file exclusions; check explicitly.
-const PUBLIC_PATHS = ['/manifest.json', '/sw.js', '/dcc-logo.png']
+const PUBLIC_PATHS = ['/manifest.json', '/manifest.webmanifest', '/sw.js', '/dcc-logo.png']
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
