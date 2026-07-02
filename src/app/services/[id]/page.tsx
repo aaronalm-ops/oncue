@@ -3,13 +3,13 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 
 const DAY_GRADIENT: Record<string, string> = {
-  THURSDAY: 'from-amber-900/30 to-transparent',
-  SATURDAY: 'from-sky-900/30 to-transparent',
+  THURSDAY: 'from-purple-900/30 to-transparent',
+  SATURDAY: 'from-violet-900/20 to-transparent',
 }
 
 const DAY_BADGE: Record<string, string> = {
-  THURSDAY: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  SATURDAY: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
+  THURSDAY: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  SATURDAY: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
 }
 
 export default async function ServicePage({ params }: { params: Promise<{ id: string }> }) {
@@ -33,7 +33,6 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
     <div className="min-h-screen bg-black text-white">
       <div className="max-w-lg mx-auto px-4 pt-12 pb-24 space-y-8">
 
-        {/* Header */}
         <div>
           <Link href="/services" className="text-zinc-500 text-sm flex items-center gap-1 mb-5 active:text-zinc-300 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -51,14 +50,13 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
           </div>
         </div>
 
-        {/* Mode selection */}
         <div className="space-y-3">
           <Link
             href={`/services/${id}/live`}
             className="flex items-center gap-4 bg-zinc-900 rounded-2xl px-5 py-5 active:bg-zinc-800 transition-colors border border-zinc-800/50"
           >
-            <div className="w-11 h-11 rounded-full bg-amber-500 flex items-center justify-center shrink-0">
-              <svg className="w-5 h-5 text-black" viewBox="0 0 24 24" fill="currentColor">
+            <div className="w-11 h-11 rounded-full bg-purple-600 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
                 <polygon points="6,4 20,12 6,20" />
               </svg>
             </div>
@@ -90,7 +88,6 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
           </Link>
         </div>
 
-        {/* Download */}
         <a
           href={`/api/services/${id}/download`}
           className="flex items-center gap-2 text-zinc-600 text-sm py-2 active:text-zinc-400 transition-colors"

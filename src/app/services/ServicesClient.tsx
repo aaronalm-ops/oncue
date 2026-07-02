@@ -23,8 +23,8 @@ function whatsappUrl(service: Service) {
 }
 
 const DAY_ACCENT: Record<string, string> = {
-  THURSDAY: 'border-l-amber-500',
-  SATURDAY: 'border-l-sky-500',
+  THURSDAY: 'border-l-purple-600',
+  SATURDAY: 'border-l-violet-400',
 }
 
 export default function ServicesClient({

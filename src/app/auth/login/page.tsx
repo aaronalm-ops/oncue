@@ -22,24 +22,28 @@ export default function LoginPage() {
         {/* Logo mark */}
         <div className="flex flex-col items-center gap-4">
           <div className="relative">
-            {/* Amber glow behind icon */}
-            <div className="absolute inset-0 rounded-3xl blur-2xl opacity-40 bg-amber-500 scale-110" />
-            <div className="relative w-20 h-20 bg-zinc-950 rounded-3xl border border-zinc-800 flex flex-col items-center justify-center gap-1.5 shadow-2xl">
+            <div className="absolute inset-0 rounded-3xl blur-2xl opacity-40 bg-purple-600 scale-110" />
+            <div className="relative w-20 h-20 bg-zinc-950 rounded-3xl border border-purple-900/50 flex flex-col items-center justify-center gap-1.5 shadow-2xl">
               <svg viewBox="0 0 32 32" className="w-8 h-8" fill="none">
-                <polygon points="8,6 26,16 8,26" fill="#F59E0B" />
+                <polygon points="8,6 26,16 8,26" fill="#9333EA" />
               </svg>
               <div className="flex gap-1.5 items-center">
-                <div className="w-7 h-1 bg-amber-500 rounded-full" />
-                <div className="w-4 h-1 bg-amber-800 rounded-full" />
-                <div className="w-2.5 h-1 bg-amber-950 rounded-full" />
+                <div className="w-7 h-1 bg-purple-600 rounded-full" />
+                <div className="w-4 h-1 bg-purple-900 rounded-full" />
+                <div className="w-2.5 h-1 bg-purple-950 rounded-full" />
               </div>
             </div>
           </div>
 
           <div className="text-center">
             <h1 className="text-3xl font-bold text-white tracking-tight">OnCue</h1>
-            <p className="mt-1 text-zinc-500 text-sm tracking-wide uppercase text-xs">Worship Team Setlist</p>
+            <p className="mt-1 text-zinc-500 text-xs tracking-wide uppercase">Worship Team Setlist</p>
           </div>
+        </div>
+
+        {/* Church logo */}
+        <div className="flex justify-center">
+          <img src="/dcc-logo.png" alt="DCC" className="h-16 w-16 rounded-2xl object-cover opacity-80" />
         </div>
 
         {/* Sign in */}
