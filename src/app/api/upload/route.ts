@@ -33,25 +33,32 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: (err as Error).message }, { status: 422 })
   }
 
-  // Upsert service
+  // Reject if a service for this date already exists
+  const { data: existing } = await supabase
+    .from('services')
+    .select('id')
+    .eq('service_date', parsed.service_date)
+    .single()
+
+  if (existing) {
+    return NextResponse.json(
+      { error: `A chart for ${parsed.service_date} already exists. Delete it first if you want to replace it.` },
+      { status: 409 }
+    )
+  }
+
   const { data: service, error: serviceError } = await supabase
     .from('services')
-    .upsert(
-      {
-        service_date: parsed.service_date,
-        day_of_week: parsed.day_of_week,
-        source_filename: parsed.source_filename,
-        instruments: parsed.instruments,
-      },
-      { onConflict: 'service_date' }
-    )
+    .insert({
+      service_date: parsed.service_date,
+      day_of_week: parsed.day_of_week,
+      source_filename: parsed.source_filename,
+      instruments: parsed.instruments,
+    })
     .select()
     .single()
 
   if (serviceError) return NextResponse.json({ error: serviceError.message }, { status: 500 })
-
-  // Delete existing songs for this service (cascade deletes sections + instructions)
-  await supabase.from('songs').delete().eq('service_id', service.id)
 
   // Insert songs, sections, instructions
   for (const parsedSong of parsed.songs) {
