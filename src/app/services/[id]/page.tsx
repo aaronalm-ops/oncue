@@ -16,13 +16,19 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   const { id } = await params
   const supabase = await createClient()
 
-  const { data: service } = await supabase
-    .from('services')
-    .select('id, service_date, day_of_week, instruments')
-    .eq('id', id)
-    .single()
+  const [{ data: service }, { data: { user } }] = await Promise.all([
+    supabase.from('services').select('id, service_date, day_of_week, instruments').eq('id', id).single(),
+    supabase.auth.getUser(),
+  ])
 
   if (!service) notFound()
+
+  const { data: profile } = user
+    ? await supabase.from('profiles').select('role').eq('id', user.id).single()
+    : { data: null }
+
+  const role = profile?.role ?? 'member'
+  const canEdit = role !== 'member'
 
   const date = new Date(service.service_date + 'T00:00:00')
   const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -86,6 +92,26 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
           </Link>
+
+          {canEdit && (
+            <Link
+              href={`/services/${id}/edit`}
+              className="flex items-center gap-4 bg-zinc-900 rounded-2xl px-5 py-5 active:bg-zinc-800 transition-colors border border-zinc-800/50"
+            >
+              <div className="w-11 h-11 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
+                <svg className="w-5 h-5 text-zinc-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+              </div>
+              <div>
+                <p className="font-semibold text-white">Edit Setlist</p>
+                <p className="text-zinc-400 text-sm">Reorder, rename, or add songs</p>
+              </div>
+              <svg className="w-4 h-4 text-zinc-600 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </Link>
+          )}
         </div>
 
         <a
