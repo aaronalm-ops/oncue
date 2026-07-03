@@ -58,24 +58,6 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
 
         <div className="space-y-3">
           <Link
-            href={`/services/${id}/live`}
-            className="flex items-center gap-4 bg-zinc-900 rounded-2xl px-5 py-5 active:bg-zinc-800 transition-colors border border-zinc-800/50"
-          >
-            <div className="w-11 h-11 rounded-full bg-purple-600 flex items-center justify-center shrink-0">
-              <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">
-                <polygon points="6,4 20,12 6,20" />
-              </svg>
-            </div>
-            <div>
-              <p className="font-semibold text-white">Live Sync</p>
-              <p className="text-zinc-400 text-sm">Follow the service in real time</p>
-            </div>
-            <svg className="w-4 h-4 text-zinc-600 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </Link>
-
-          <Link
             href={`/services/${id}/my-part`}
             className="flex items-center gap-4 bg-zinc-900 rounded-2xl px-5 py-5 active:bg-zinc-800 transition-colors border border-zinc-800/50"
           >

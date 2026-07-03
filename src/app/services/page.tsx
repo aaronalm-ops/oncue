@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import UploadButton from '@/components/UploadButton'
 import UserMenu from '@/components/UserMenu'
 import ServicesClient from './ServicesClient'
+import Link from 'next/link'
 import type { AppRole } from '@/lib/types'
 
 export default async function ServicesPage() {
@@ -12,6 +13,7 @@ export default async function ServicesPage() {
     .from('profiles').select('role, instrument').eq('id', user!.id).single()
   const role = (profile?.role ?? 'member') as AppRole
   const isPrivileged = role === 'master' || role === 'admin'
+  const canAccessLibrary = role !== 'member'
 
   const { data: services } = await supabase
     .from('services')
@@ -38,6 +40,17 @@ export default async function ServicesPage() {
           </div>
 
           <div className="flex items-center gap-2.5">
+            {canAccessLibrary && (
+              <Link
+                href="/library"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs font-semibold active:bg-zinc-800 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                </svg>
+                Chords
+              </Link>
+            )}
             {isPrivileged && <UploadButton />}
             <UserMenu instrument={profile?.instrument ?? null} role={role} />
             <img

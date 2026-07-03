@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
@@ -179,6 +179,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   const [activeSongIdx, setActiveSongIdx] = useState(0)
   const [highContrast, setHighContrast] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isLive, setIsLive] = useState(false)
   const [notes, setNotes] = useState<Record<string, string>>(
     Object.fromEntries(initialNotes.map(n => [`${n.section_id}:${n.instrument}`, n.note_text]))
   )
@@ -187,10 +188,83 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   const [openNotes, setOpenNotes] = useState<Record<string, boolean>>({})
 
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
+  const channelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null)
+  const isLiveRef = useRef(false)
+  const activeSongIdxRef = useRef(0)
+
+  // Keep refs in sync
+  useEffect(() => { isLiveRef.current = isLive }, [isLive])
+  useEffect(() => { activeSongIdxRef.current = activeSongIdx }, [activeSongIdx])
+
   function getClient() {
     if (!supabaseRef.current) supabaseRef.current = createClient()
     return supabaseRef.current
   }
+
+  // Navigate to a song index and broadcast if live
+  const goToSong = useCallback((idx: number) => {
+    const clamped = Math.max(0, Math.min(songs.length - 1, idx))
+    setActiveSongIdx(clamped)
+    if (isLiveRef.current) {
+      getClient().from('session_state').upsert({
+        service_id: serviceId,
+        current_song_index: clamped,
+        current_section_index: 0,
+        updated_by: userId,
+      }, { onConflict: 'service_id' })
+    }
+  }, [serviceId, songs.length, userId])
+
+  // Realtime subscription when live
+  useEffect(() => {
+    if (!isLive) {
+      channelRef.current?.unsubscribe()
+      channelRef.current = null
+      return
+    }
+
+    const channel = getClient()
+      .channel(`go-live:${serviceId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'session_state', filter: `service_id=eq.${serviceId}` },
+        (payload) => {
+          const state = payload.new as { current_song_index?: number; updated_by?: string }
+          // Don't apply our own broadcasts
+          if (state.updated_by === userId) return
+          if (typeof state.current_song_index === 'number') {
+            setActiveSongIdx(state.current_song_index)
+          }
+        }
+      )
+      .subscribe()
+
+    channelRef.current = channel
+    return () => {
+      channel.unsubscribe()
+      channelRef.current = null
+    }
+  }, [isLive, serviceId, userId])
+
+  // Pedal / keyboard navigation (always registered, only acts when live)
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      if (!isLiveRef.current) return
+      // Don't fire when typing in an input/textarea
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        e.preventDefault()
+        goToSong(activeSongIdxRef.current + 1)
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault()
+        goToSong(activeSongIdxRef.current - 1)
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [goToSong])
 
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
@@ -257,7 +331,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
 
   return (
     <div className={`h-screen overflow-hidden ${bg} ${fg} flex flex-col`}>
-      {/* Running order — wraps to multiple lines so all songs always visible */}
+      {/* Running order strip */}
       <div className={`border-b ${borderB} shrink-0 px-3 py-2`}>
         <div className="flex flex-wrap gap-1.5 items-center">
           <Link href="/services"
@@ -273,7 +347,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
             return (
               <button key={song.id}
                 onClick={() => {
-                  setActiveSongIdx(si)
+                  goToSong(si)
                   if (layout === 'scroll') document.getElementById(`song-${si}`)?.scrollIntoView({ behavior: 'smooth' })
                 }}
                 className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-all active:scale-95 ${
@@ -293,6 +367,13 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
               </button>
             )
           })}
+          {/* Live indicator in strip */}
+          {isLive && (
+            <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-bold text-green-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              LIVE
+            </span>
+          )}
         </div>
       </div>
 
@@ -333,7 +414,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
 
       {/* Fixed bottom bar */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderB} ${bg} px-4 pt-2.5 pb-4`}>
-        {/* Instruments + stage */}
+        {/* Instruments + Stage + Go Live */}
         <div className="flex items-center gap-1.5 mb-2 overflow-x-auto no-scrollbar">
           {instruments.map(instr => (
             <button key={instr} onClick={() => handleInstrumentChange(instr)}
@@ -349,12 +430,21 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
             className={`ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
             {hc ? 'Stage off' : 'Stage'}
           </button>
+          <button
+            onClick={() => setIsLive(l => !l)}
+            className={`shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 transition-colors ${
+              isLive
+                ? 'bg-green-600 text-white'
+                : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
+            }`}>
+            {isLive ? '● Live' : 'Go Live'}
+          </button>
         </div>
 
-        {/* Prev / layout toggle / Next — always fixed */}
+        {/* Prev / layout toggle / Next */}
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setActiveSongIdx(i => Math.max(0, i - 1))}
+            onClick={() => goToSong(activeSongIdx - 1)}
             disabled={activeSongIdx === 0}
             className={`flex-1 rounded-xl py-2.5 text-sm font-semibold disabled:opacity-30 active:scale-95 transition-all ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
             ← Prev
@@ -374,7 +464,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
             )}
           </button>
           <button
-            onClick={() => setActiveSongIdx(i => Math.min(songs.length - 1, i + 1))}
+            onClick={() => goToSong(activeSongIdx + 1)}
             disabled={activeSongIdx === songs.length - 1}
             className={`flex-1 rounded-xl py-2.5 text-sm font-semibold disabled:opacity-30 active:scale-95 transition-all ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
             Next →
