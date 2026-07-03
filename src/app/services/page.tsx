@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import UploadButton from '@/components/UploadButton'
 import UserMenu from '@/components/UserMenu'
 import ServicesClient from './ServicesClient'
+import type { AppRole } from '@/lib/types'
 
 export default async function ServicesPage() {
   const supabase = await createClient()
@@ -9,7 +10,7 @@ export default async function ServicesPage() {
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase
     .from('profiles').select('role, instrument').eq('id', user!.id).single()
-  const role = (profile?.role ?? 'member') as 'master' | 'admin' | 'member'
+  const role = (profile?.role ?? 'member') as AppRole
   const isPrivileged = role === 'master' || role === 'admin'
 
   const { data: services } = await supabase
@@ -38,7 +39,7 @@ export default async function ServicesPage() {
 
           <div className="flex items-center gap-2.5">
             {isPrivileged && <UploadButton />}
-            <UserMenu instrument={profile?.instrument ?? null} />
+            <UserMenu instrument={profile?.instrument ?? null} role={role} />
             <img
               src="/dcc-logo.png"
               alt="DCC"

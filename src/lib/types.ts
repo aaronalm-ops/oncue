@@ -51,10 +51,13 @@ export interface UserNote {
   note_text: string
 }
 
+export type AppRole = 'master' | 'admin' | 'worship_leader' | 'member'
+
 export interface Profile {
   id: string
   instrument: string | null
   display_name: string | null
+  role: AppRole
 }
 
 // Enriched types for UI
