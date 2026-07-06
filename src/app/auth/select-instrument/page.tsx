@@ -70,7 +70,7 @@ export default function SelectInstrumentPage() {
             ) : (
               <p className="mt-1 text-zinc-500 text-sm">
                 Instrument: <span className="text-purple-400 font-medium">
-                  {(selected || currentInstrument ?? '').charAt(0) + (selected || currentInstrument ?? '').slice(1).toLowerCase()}
+                  {(selected || currentInstrument || '').charAt(0) + (selected || currentInstrument || '').slice(1).toLowerCase()}
                 </span>
               </p>
             )}
