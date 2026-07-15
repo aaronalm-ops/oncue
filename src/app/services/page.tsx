@@ -53,11 +53,6 @@ export default async function ServicesPage() {
             )}
             {isPrivileged && <UploadButton />}
             <UserMenu instrument={profile?.instrument ?? null} role={role} />
-            <img
-              src="/dcc-logo.png"
-              alt="DCC"
-              className="h-10 w-10 rounded-xl object-cover ring-1 ring-purple-900/40"
-            />
           </div>
         </div>
 

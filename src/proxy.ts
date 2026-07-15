@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 // These must always be served without auth — SW and Chrome fetch them cookieless
-const PUBLIC_PATHS = ['/manifest.json', '/manifest.webmanifest', '/sw.js', '/dcc-logo.png']
+const PUBLIC_PATHS = ['/manifest.json', '/manifest.webmanifest', '/sw.js']
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl

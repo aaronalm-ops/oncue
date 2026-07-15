@@ -41,11 +41,6 @@ export default function LoginPage() {
           </div>
         </div>
 
-        {/* Church logo */}
-        <div className="flex justify-center">
-          <img src="/dcc-logo.png" alt="DCC" className="h-16 w-16 rounded-2xl object-cover opacity-80" />
-        </div>
-
         {/* Sign in */}
         <button
           onClick={handleGoogleSignIn}
