@@ -16,8 +16,8 @@ export default async function RootPage() {
 
   if (!profile?.instrument) redirect('/auth/select-instrument')
 
-  // Check for a service today
-  const today = new Date().toISOString().split('T')[0]
+  // Check for a service today — in the church's timezone, not the server's (UTC on Vercel)
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date())
   const { data: todayService } = await supabase
     .from('services')
     .select('id')
