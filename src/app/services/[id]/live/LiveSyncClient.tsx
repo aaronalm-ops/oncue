@@ -45,6 +45,17 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     return supabaseRef.current
   }
 
+  // Persist stage-contrast preference across sessions
+  useEffect(() => {
+    setHighContrast(localStorage.getItem('oncue-stage') === '1')
+  }, [])
+  function toggleContrast() {
+    setHighContrast(h => {
+      localStorage.setItem('oncue-stage', h ? '0' : '1')
+      return !h
+    })
+  }
+
   function handleInstrumentChange(instr: string) {
     setViewInstrument(instr)
     getClient().from('profiles').update({ instrument: instr }).eq('id', userId)
@@ -68,6 +79,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
       current_song_index: newSongIdx,
       current_section_index: newSectionIdx,
       updated_at: new Date().toISOString(),
+      updated_by: userId,
     }, { onConflict: 'service_id' })
     setIsSaving(false)
   }
@@ -99,23 +111,43 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   useEffect(() => {
     let retryTimeout: ReturnType<typeof setTimeout>
 
+    // Catch-up: any missed moves (dropped connection, subscribe gap after SSR)
+    // are recovered by refetching the authoritative row.
+    async function refetchState() {
+      const { data } = await getClient()
+        .from('session_state')
+        .select('current_song_index, current_section_index')
+        .eq('service_id', serviceId)
+        .single()
+      if (data) {
+        setSongIdx(data.current_song_index)
+        setSectionIdx(data.current_section_index)
+      }
+    }
+
     function subscribe() {
       const channel = getClient()
         .channel(`session:${serviceId}`)
         .on('postgres_changes', {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
           table: 'session_state',
           filter: `service_id=eq.${serviceId}`,
         }, payload => {
-          const { current_song_index, current_section_index } = payload.new as { current_song_index: number; current_section_index: number }
-          setSongIdx(current_song_index)
-          setSectionIdx(current_section_index)
-          setNotesOpen(false)
-          setSyncStatus('live')
+          const state = payload.new as { current_song_index?: number; current_section_index?: number; updated_by?: string | null }
+          if (state.updated_by === userId) return // own move, already applied locally
+          if (typeof state.current_song_index === 'number' && typeof state.current_section_index === 'number') {
+            setSongIdx(state.current_song_index)
+            setSectionIdx(state.current_section_index)
+            setNotesOpen(false)
+            setSyncStatus('live')
+          }
         })
         .subscribe(status => {
-          if (status === 'SUBSCRIBED') setSyncStatus('live')
+          if (status === 'SUBSCRIBED') {
+            setSyncStatus('live')
+            refetchState()
+          }
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
             setSyncStatus('reconnecting')
             retryTimeout = setTimeout(() => {
@@ -129,11 +161,19 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     }
 
     const channel = subscribe()
+
+    // Browser regained network: realtime will reconnect, but refetch immediately
+    // so the device catches up without waiting for the next move.
+    const onOnline = () => refetchState()
+    window.addEventListener('online', onOnline)
+
     return () => {
       clearTimeout(retryTimeout)
+      window.removeEventListener('online', onOnline)
       getClient().removeChannel(channel)
     }
-  }, [serviceId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceId, userId])
 
   if (songs.length === 0) {
     return (
@@ -315,7 +355,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
               {instr}
             </button>
           ))}
-          <button onClick={() => setHighContrast(h => !h)}
+          <button onClick={toggleContrast}
             className={`ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
             {hc ? 'Stage off' : 'Stage'}
           </button>

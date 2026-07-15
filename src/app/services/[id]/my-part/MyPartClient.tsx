@@ -201,6 +201,17 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     return supabaseRef.current
   }
 
+  // Persist stage-contrast preference across sessions
+  useEffect(() => {
+    setHighContrast(localStorage.getItem('oncue-stage') === '1')
+  }, [])
+  function toggleContrast() {
+    setHighContrast(h => {
+      localStorage.setItem('oncue-stage', h ? '0' : '1')
+      return !h
+    })
+  }
+
   // Navigate to a song index and broadcast if live
   const goToSong = useCallback((idx: number) => {
     const clamped = Math.max(0, Math.min(songs.length - 1, idx))
@@ -426,7 +437,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
               {instr}
             </button>
           ))}
-          <button onClick={() => setHighContrast(h => !h)}
+          <button onClick={toggleContrast}
             className={`ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
             {hc ? 'Stage off' : 'Stage'}
           </button>
