@@ -15,8 +15,11 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Allowlist — a missing profile row must NOT grant access
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role === 'member') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!profile || !['master', 'admin', 'worship_leader'].includes(profile.role ?? '')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { songs } = await request.json() as { songs: SongInput[] }
 

@@ -21,8 +21,11 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Allowlist — a missing profile row must NOT grant access
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (profile?.role === 'member') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!profile || !['master', 'admin', 'worship_leader'].includes(profile.role ?? '')) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { title, artist } = await request.json() as { title: string; artist?: string }
   if (!title?.trim()) return NextResponse.json({ error: 'Title is required' }, { status: 400 })

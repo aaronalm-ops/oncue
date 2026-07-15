@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createClient as createAdminClient } from '@supabase/supabase-js'
 import type { AppRole } from '@/lib/types'
 
 function canChangeRole(actorRole: AppRole, targetRole: AppRole, newRole: AppRole): boolean {
@@ -67,7 +68,21 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
   }
 
-  const { error } = await supabase.from('profiles').delete().eq('id', id)
+  // Deleting only the profile row leaves the auth user able to log in and
+  // read everything. Real removal deletes the auth user (profile cascades).
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!serviceKey || !supabaseUrl) {
+    return NextResponse.json(
+      { error: 'SUPABASE_SERVICE_ROLE_KEY is not configured — cannot fully remove a member. Add it to the environment and retry.' },
+      { status: 500 }
+    )
+  }
+
+  const adminClient = createAdminClient(supabaseUrl, serviceKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })
+  const { error } = await adminClient.auth.admin.deleteUser(id)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   return NextResponse.json({ success: true })

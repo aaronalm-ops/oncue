@@ -33,90 +33,51 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: (err as Error).message }, { status: 422 })
   }
 
-  // Reject if a service for this date already exists
-  const { data: existing } = await supabase
-    .from('services')
-    .select('id')
-    .eq('service_date', parsed.service_date)
-    .single()
-
-  if (existing) {
+  if (parsed.songs.length === 0) {
     return NextResponse.json(
-      { error: `A chart for ${parsed.service_date} already exists. Delete it first if you want to replace it.` },
-      { status: 409 }
+      { error: 'No songs found in the chart — check that Sheet1 has SONG rows.' },
+      { status: 422 }
     )
   }
 
-  const { data: service, error: serviceError } = await supabase
-    .from('services')
-    .insert({
+  // Atomic create-or-replace in a single transaction (preserves private notes on replace)
+  const { data: result, error: rpcError } = await supabase.rpc('ingest_chart', {
+    payload: {
       service_date: parsed.service_date,
       day_of_week: parsed.day_of_week,
       source_filename: parsed.source_filename,
       instruments: parsed.instruments,
-    })
-    .select()
-    .single()
+      songs: parsed.songs,
+    },
+  })
 
-  if (serviceError) return NextResponse.json({ error: serviceError.message }, { status: 500 })
+  if (rpcError) return NextResponse.json({ error: rpcError.message }, { status: 500 })
 
-  // Insert songs, sections, instructions
-  for (const parsedSong of parsed.songs) {
-    const { data: song, error: songError } = await supabase
-      .from('songs')
-      .insert({
-        service_id: service.id,
-        order_index: parsedSong.order_index,
-        title: parsedSong.title,
-        scale: parsedSong.scale,
-        medley_group: parsedSong.medley_group,
-        reference_links: parsedSong.reference_links,
-      })
-      .select()
-      .single()
-
-    if (songError) return NextResponse.json({ error: songError.message }, { status: 500 })
-
-    for (let si = 0; si < parsedSong.sections.length; si++) {
-      const parsedSection = parsedSong.sections[si]
-      const { data: section, error: sectionError } = await supabase
-        .from('sections')
-        .insert({
-          song_id: song.id,
-          order_index: si,
-          label: parsedSection.label,
-          comments: parsedSection.comments,
-        })
-        .select()
-        .single()
-
-      if (sectionError) return NextResponse.json({ error: sectionError.message }, { status: 500 })
-
-      if (parsedSection.instructions.length > 0) {
-        const { error: instrError } = await supabase.from('instructions').insert(
-          parsedSection.instructions.map(instr => ({
-            section_id: section.id,
-            instrument: instr.instrument,
-            text: instr.text,
-            is_intro: instr.is_intro,
-          }))
-        )
-        if (instrError) return NextResponse.json({ error: instrError.message }, { status: 500 })
-      }
-    }
+  const { service_id, replaced, notes_restored } = result as {
+    service_id: string
+    replaced: boolean
+    songs: number
+    notes_restored: number
   }
 
-  // Ensure session_state row exists
-  await supabase
-    .from('session_state')
-    .upsert({ service_id: service.id, current_song_index: 0, current_section_index: 0 }, { onConflict: 'service_id' })
-
-  // Store the original file in Supabase Storage
+  // Store the original file so "Download Excel" always works.
+  // Surface a failure instead of swallowing it.
+  let warning: string | undefined
   const { error: storageError } = await supabase.storage
     .from('charts')
-    .upload(`${service.id}/${filename}`, buffer, { upsert: true, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    .upload(`${service_id}/${filename}`, buffer, {
+      upsert: true,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+  if (storageError) {
+    warning = `Chart saved, but storing the original file failed (${storageError.message}). The download button for this service will not work.`
+  }
 
-  if (storageError) console.warn('Storage upload failed:', storageError.message)
-
-  return NextResponse.json({ service_id: service.id, songs: parsed.songs.length })
+  return NextResponse.json({
+    service_id,
+    songs: parsed.songs.length,
+    replaced,
+    notes_restored,
+    ...(warning ? { warning } : {}),
+  })
 }

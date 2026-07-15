@@ -106,9 +106,12 @@ export async function parseChart(buffer: any, filename: string): Promise<ParseRe
   // --- Walk rows ---
   const songs: ParsedSong[] = []
   let currentSong: ParsedSong | null = null
+  // A MEDLEY row's label lists its member songs separated by "/".
+  // The medley covers exactly the next N SONG rows, so we count down
+  // instead of matching titles (labels can carry typos, e.g. "MIGHT" vs "MIGHTY").
   let currentMedley: string | null = null
+  let medleyRemaining = 0
   let songIndex = 0
-  let sectionIndex = 0
 
   ws.eachRow({ includeEmpty: false }, (row, rowNum) => {
     if (rowNum === 1) return
@@ -118,6 +121,8 @@ export async function parseChart(buffer: any, filename: string): Promise<ParseRe
 
     if (colA === 'MEDLEY') {
       currentMedley = cellText(row.getCell(2).value)
+      medleyRemaining = currentMedley.split('/').filter(p => p.trim()).length
+      if (medleyRemaining === 0) currentMedley = null
       return
     }
 
@@ -137,30 +142,20 @@ export async function parseChart(buffer: any, filename: string): Promise<ParseRe
         rowUrls.push(...extractUrls(lv))
       }
 
+      const inMedley = medleyRemaining > 0
+      if (inMedley) medleyRemaining--
+
       currentSong = {
         order_index: songIndex++,
         title,
         scale,
-        medley_group: currentMedley,
+        medley_group: inMedley ? currentMedley : null,
         reference_links: [...new Set(rowUrls.filter(u => u.startsWith('http')))],
         sections: [],
       }
       songs.push(currentSong)
-      sectionIndex = 0
 
-      // Reset medley after a solo SONG (medley only covers its explicit group)
-      // Only reset if this song is NOT in a medley group — but actually medley covers
-      // consecutive songs listed, so we keep currentMedley until a non-medley song appears.
-      // The chart author writes MEDLEY then the constituent SONG rows, then a normal SONG.
-      // We reset medley when a SONG row appears that has no medley context — but there's no
-      // explicit end marker, so we keep it for the immediately following songs and reset
-      // when we see another MEDLEY or a SONG with blank medley context after a gap.
-      // Simplest rule matching the real files: reset after each standalone SONG block.
-      // Actually examining the files: MEDLEY row covers the next N SONG rows. We can't know N.
-      // Keep currentMedley — if a new MEDLEY row appears it will reset it. If no MEDLEY row
-      // follows, it stays, which is slightly wrong for the first solo song after a medley.
-      // Better: reset on any SONG that is NOT immediately after the MEDLEY row.
-      // Track it with a flag.
+      if (medleyRemaining === 0) currentMedley = null
       return
     }
 
@@ -194,11 +189,10 @@ export async function parseChart(buffer: any, filename: string): Promise<ParseRe
       })
 
       currentSong.sections.push({
-        label: cellText(row.getCell(structureCol).value), // verbatim original
+        label,
         comments,
         instructions,
       })
-      sectionIndex++
     }
   })
 

@@ -7,6 +7,7 @@ export default function UploadButton() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
   const [errors, setErrors] = useState<string[]>([])
+  const [notices, setNotices] = useState<string[]>([])
   const router = useRouter()
 
   async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
@@ -14,7 +15,9 @@ export default function UploadButton() {
     if (files.length === 0) return
 
     setErrors([])
+    setNotices([])
     const errs: string[] = []
+    const notes: string[] = []
 
     for (let i = 0; i < files.length; i++) {
       setProgress({ current: i + 1, total: files.length })
@@ -27,6 +30,14 @@ export default function UploadButton() {
 
       if (!res.ok) {
         errs.push(`${files[i].name}: ${data.error ?? 'Upload failed'}`)
+      } else {
+        if (data.replaced) {
+          notes.push(
+            `${files[i].name}: replaced the existing chart for that date` +
+            (data.notes_restored > 0 ? ` (${data.notes_restored} personal note${data.notes_restored === 1 ? '' : 's'} preserved)` : '')
+          )
+        }
+        if (data.warning) notes.push(`${files[i].name}: ${data.warning}`)
       }
     }
 
@@ -34,6 +45,7 @@ export default function UploadButton() {
     if (inputRef.current) inputRef.current.value = ''
 
     if (errs.length) setErrors(errs)
+    if (notes.length) setNotices(notes)
     router.refresh()
   }
 
@@ -64,6 +76,13 @@ export default function UploadButton() {
         <div className="mt-1 space-y-0.5">
           {errors.map((err, i) => (
             <p key={i} className="text-red-400 text-xs">{err}</p>
+          ))}
+        </div>
+      )}
+      {notices.length > 0 && (
+        <div className="mt-1 space-y-0.5">
+          {notices.map((n, i) => (
+            <p key={i} className="text-amber-400 text-xs">{n}</p>
           ))}
         </div>
       )}
