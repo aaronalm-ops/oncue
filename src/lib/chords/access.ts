@@ -9,7 +9,7 @@
  * redeploy — that single change opens chords to everyone. (Unreviewed
  * versions remain hidden from members regardless, via RLS.)
  */
-export const CHORDS_OPEN_TO_ALL = false
+export const CHORDS_OPEN_TO_ALL = true
 
 const EDITOR_ROLES = ['master', 'admin', 'worship_leader']
 

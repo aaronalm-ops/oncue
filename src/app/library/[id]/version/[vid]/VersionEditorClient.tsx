@@ -164,6 +164,18 @@ export default function VersionEditorClient({ songId, songTitle, version, pdfUrl
         </div>
       )}
 
+      {/* Scanned-PDF notice: no text layer to parse — paste mode */}
+      {!content.trim() && pdfUrl && (
+        <div className="shrink-0 bg-amber-950/60 border-b border-amber-900 px-4 py-2">
+          <p className="text-[11px] text-amber-300">
+            This PDF is a scan (a picture) — there is no text inside it to read automatically.
+            Open the PDF{' '}
+            <a href={pdfUrl} target="_blank" rel="noopener noreferrer" className="underline">in a new tab</a>{' '}
+            and type or paste the chords into the editor, then approve.
+          </p>
+        </div>
+      )}
+
       {/* Pane switcher (phones see one pane; desktop sees edit+preview side by side) */}
       <div className="shrink-0 px-4 py-2 flex items-center gap-1.5 lg:hidden">
         {panes.filter(p => p.show).map(p => (

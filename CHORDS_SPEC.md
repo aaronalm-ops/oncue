@@ -120,6 +120,66 @@ The conductor's notes and the chords, together:
 - Editing chords from the service views (library is the only editor)
 - Any change to the Live Sync verbatim chart pane
 
+## V3 — Section mapping overrides (planned)
+
+Auto-matching chart labels to chord sections covers most cases (exact label →
+base word), but some pairs never match by name: chart `INSTRUMENTAL SOLO` vs
+sheet `Interlude`, chart `FULL SONG` vs sheet `Chorus`. Editors need a manual
+mapping:
+
+- **Where:** on any chords view, an unmatched chart section shows (to editors
+  only) a quiet "map to…" control listing the sheet's sections. One tap saves.
+- **Storage:** `chord_section_maps (library_song_id, chart_label_normalized,
+  chord_section_label, unique(library_song_id, chart_label_normalized))`.
+  Keyed to the LIBRARY song, not the service song — map once, applies every
+  week the song reappears, whatever the service.
+- **Precedence in matching:** manual map → exact full label → base word.
+  Members never see mapping UI; they just see sections resolve.
+- Mappings are data, not parsing: verbatim content is untouched.
+
+## V3 — Setlist-first weekly flow (planned)
+
+**Reality today (retrofit era):** setlist arrives Monday; confirmed Tuesday at
+choir practice; the conductor's Excel lands Wednesday and *creates* the
+service; chord sheets are uploaded after and matched by title.
+
+**Target flow:** the setlist is created FIRST (Monday), owned by a worship
+leader; the conductor's notes arrive later and are laid ONTO that setlist —
+but the conductor's chart directs the live flow.
+
+**Design:**
+
+1. **Setlist draft.** A service can now exist *before* the chart: editors
+   create it with date + **worship leader** (new `services.worship_leader_id`
+   → profiles) + ordered songs picked from the library (title + key), each
+   linked (`song_links`) at creation. Chords are therefore available to the
+   team from Monday — days before the chart exists.
+2. **Practice edits (Tuesday).** The existing Edit Setlist page covers
+   reorders/swaps; links follow the songs.
+3. **Chart upload (Wednesday) becomes a MERGE, not a create.** `ingest_chart`
+   already replaces in place; it grows one step: when the service already has
+   songs, match incoming chart songs to existing ones by normalised title —
+   matched songs keep their id (and thus their `song_links` and user notes),
+   receive the chart's sections/instructions, and take the chart's order.
+   The conductor's chart wins on order and structure — it directs the flow.
+   Chart songs with no setlist match are added; setlist songs missing from
+   the chart are kept but flagged "not in chart" to editors.
+4. **Worship-leader attribution.** `worship_leader_id` shown on the service
+   card; later enables per-leader defaults (their favoured keys per song via
+   the same `user_scale_preferences` mechanism, surfaced as the default when
+   no chart scale exists yet).
+5. **Interim mode (now):** the admin creates the setlist manually from the
+   Monday message, uploads chord sheets against it, saves the worship leader.
+   Wednesday's chart upload merges exactly as above. Nothing about the
+   current upload habit changes — the merge makes the order of arrival
+   irrelevant, which is the whole point: *setlist-first and chart-first both
+   converge to the same state.*
+
+**Build pieces when we start:** `services.worship_leader_id` column +
+"Create setlist" UI (date, leader, library song picker) + title-matching
+merge inside `ingest_chart` + "not in chart" flags. No breaking changes to
+anything shipped.
+
 ## Build order
 
 **Phase 1 — Library core (unblocks everything):** `/library/[id]` detail page (fixes the 404), PDF upload + storage, text extraction, heuristic parser, review editor with autosave, approve → derive sections. *Done when: all six fixtures in `chord-samples/` ingest to approved versions with ≤ 2 min of human fixes each (WHO IS THIS KING may legitimately need paste-mode — that still counts if the flow is smooth).*
