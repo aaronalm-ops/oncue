@@ -78,8 +78,11 @@ export function parseBody(body: string): BodyLine[] {
       continue
     }
     const parts = parseInlineChords(line)
-    const instrumental = parts.every(p => p.chord !== null || p.text.trim() === '')
-      && parts.some(p => p.chord !== null)
+    // Instrumental = chords with NO lyric text at all. Never classify by
+    // "every word has a chord" — "[G]Hallelujah [D]hallelujah" is a lyric
+    // line, and treating it as instrumental silently dropped the lyrics.
+    const instrumental = parts.some(p => p.chord !== null)
+      && parts.every(p => p.text.trim() === '')
     out.push({ type: 'line', parts, instrumental })
   }
   // drop trailing blanks
@@ -275,4 +278,57 @@ export function reorderBodyToChart(body: string, chartLabels: string[]): Reorder
 
   if (matched === 0) return { body, matched: 0, unmatched }
   return { body: out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n+$/g, ''), matched, unmatched }
+}
+
+// ============================================================
+// Per-chart-section mapping for the combined chart+chords pane:
+// one entry per chart section, in chart order, so the pane can
+// highlight and follow the live position (index-aligned).
+// ============================================================
+
+export interface ChartSectionChords {
+  label: string // the chart's label (conductor's wording)
+  content: string | null // matched chord content, or null
+}
+
+export interface ChartChordsMap {
+  sections: ChartSectionChords[]
+  leftovers: DerivedSection[] // chord sections the chart never used
+  matched: number
+}
+
+export function mapChartSectionsToChords(body: string, chartLabels: string[]): ChartChordsMap {
+  const chordSections = deriveSections(body)
+  const byFull = new Map<string, DerivedSection[]>()
+  const byBase = new Map<string, DerivedSection[]>()
+  for (const s of chordSections) {
+    const full = normalizeSectionLabelFull(s.label)
+    const base = normalizeSectionLabel(s.label)
+    byFull.set(full, [...(byFull.get(full) ?? []), s])
+    byBase.set(base, [...(byBase.get(base) ?? []), s])
+  }
+
+  const used = new Set<number>()
+  const cursors = new Map<string, number>()
+  let matched = 0
+
+  const sections: ChartSectionChords[] = chartLabels.map(chartLabel => {
+    const full = normalizeSectionLabelFull(chartLabel)
+    const base = normalizeSectionLabel(chartLabel)
+    const pool = byFull.get(full)?.length ? byFull.get(full)! : (byBase.get(base) ?? [])
+    if (pool.length === 0) return { label: chartLabel, content: null }
+    const cursorKey = pool === byFull.get(full) ? `f:${full}` : `b:${base}`
+    const cursor = cursors.get(cursorKey) ?? 0
+    const section = pool[cursor % pool.length]
+    cursors.set(cursorKey, cursor + 1)
+    used.add(section.order_index)
+    matched++
+    return { label: chartLabel, content: section.content || null }
+  })
+
+  return {
+    sections,
+    leftovers: chordSections.filter(s => !used.has(s.order_index)),
+    matched,
+  }
 }

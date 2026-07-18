@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
+import { canSeeChords } from '@/lib/chords/access'
 
 const DAY_GRADIENT: Record<string, string> = {
   THURSDAY: 'from-purple-900/30 to-transparent',
@@ -36,11 +37,15 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   const badge = DAY_BADGE[service.day_of_week] ?? 'bg-zinc-800 text-zinc-400 border-zinc-700'
 
   // Which songs have chords available (via confirmed link, or title match)?
-  const { data: songs } = await supabase
-    .from('songs')
-    .select('id, order_index, title, scale')
-    .eq('service_id', id)
-    .order('order_index')
+  // Gated to editors until the parser rollout opens chords to everyone.
+  const chordsVisible = canSeeChords(role)
+  const { data: songs } = chordsVisible
+    ? await supabase
+        .from('songs')
+        .select('id, order_index, title, scale')
+        .eq('service_id', id)
+        .order('order_index')
+    : { data: [] as { id: string; order_index: number; title: string; scale: string | null }[] }
 
   const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
   const songIds = (songs ?? []).map(s => s.id)

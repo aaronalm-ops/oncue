@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
 import { reorderBodyToChart } from '@/lib/chords/format'
+import { canSeeChords } from '@/lib/chords/access'
 
 /**
  * A song's chords in the context of a service:
@@ -14,6 +15,10 @@ export default async function ServiceSongChordsPage({ params }: { params: Promis
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login')
+
+  // Gated to editors until the parser rollout opens chords to everyone
+  const { data: viewerProfile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+  if (!canSeeChords(viewerProfile?.role)) redirect(`/services/${id}`)
 
   const { data: song } = await supabase
     .from('songs')

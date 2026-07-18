@@ -3,6 +3,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
+import ChordsPane from '@/components/ChordsPane'
+import type { SongChordsData } from '@/lib/chords/service-chords'
 
 interface Instruction { id: string; instrument: string; text: string; is_intro: boolean }
 interface Section { id: string; order_index: number; label: string; comments: string; instructions: Instruction[] }
@@ -16,9 +18,11 @@ interface Props {
   userInstrument: string | null
   initialSongIndex: number
   initialSectionIndex: number
+  chordsBySongId: Record<string, SongChordsData>
+  prefsByLibraryId: Record<string, string>
 }
 
-export default function LiveSyncClient({ serviceId, userId, songs, instruments, userInstrument, initialSongIndex, initialSectionIndex }: Props) {
+export default function LiveSyncClient({ serviceId, userId, songs, instruments, userInstrument, initialSongIndex, initialSectionIndex, chordsBySongId, prefsByLibraryId }: Props) {
   const [songIdx, setSongIdx] = useState(initialSongIndex)
   const [sectionIdx, setSectionIdx] = useState(initialSectionIndex)
   const [highContrast, setHighContrast] = useState(false)
@@ -28,6 +32,22 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   const [isSaving, setIsSaving] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [syncStatus, setSyncStatus] = useState<'live' | 'reconnecting' | 'offline'>('live')
+  const [paneIdx, setPaneIdx] = useState(0) // 0 = chart, 1 = chords (phone swipe)
+  const swipeRef = useRef<HTMLDivElement | null>(null)
+
+  const hasAnyChords = songs.some(s => chordsBySongId[s.id])
+
+  function onSwipeScroll() {
+    const el = swipeRef.current
+    if (!el || el.clientWidth === 0) return
+    setPaneIdx(Math.round(el.scrollLeft / el.clientWidth))
+  }
+
+  function scrollToPane(idx: number) {
+    const el = swipeRef.current
+    if (!el) return
+    el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' })
+  }
 
   function toggleFullscreen() {
     if (!document.fullscreenElement) {
@@ -268,8 +288,16 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
         )}
       </button>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col px-4 pt-3 pb-36 max-w-2xl mx-auto w-full gap-3 overflow-y-auto">
+      {/* Main content — swipe between Chart and Chords on phones; side-by-side on large screens */}
+      <div
+        ref={swipeRef}
+        onScroll={hasAnyChords ? onSwipeScroll : undefined}
+        className={`flex-1 min-h-0 ${hasAnyChords
+          ? 'flex overflow-x-auto snap-x snap-mandatory no-scrollbar lg:grid lg:grid-cols-2 lg:overflow-x-hidden'
+          : 'flex flex-col'}`}
+      >
+      <div className={hasAnyChords ? 'min-w-full lg:min-w-0 snap-center overflow-y-auto h-full' : 'flex-1 min-h-0 overflow-y-auto'}>
+      <div className="flex flex-col px-4 pt-3 pb-36 max-w-2xl mx-auto w-full gap-3">
 
         <div className="flex items-center gap-2">
           <span className={`font-bold text-base leading-tight ${fg}`}>{currentSong?.title}</span>
@@ -340,6 +368,50 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           </p>
         )}
       </div>
+      </div>
+
+      {/* Chords pane */}
+      {hasAnyChords && currentSong && (
+        <div className="min-w-full lg:min-w-0 snap-center overflow-y-auto h-full lg:border-l lg:border-zinc-800">
+          <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
+            <ChordsPane
+              key={currentSong.id}
+              songTitle={currentSong.title}
+              chartLabels={currentSong.sections.map(s => s.label)}
+              chords={chordsBySongId[currentSong.id] ?? null}
+              songScale={currentSong.scale}
+              initialKey={
+                chordsBySongId[currentSong.id]
+                  ? prefsByLibraryId[chordsBySongId[currentSong.id].librarySongId] ?? null
+                  : null
+              }
+              userId={userId}
+              currentSectionIdx={Math.min(sectionIdx, (currentSong.sections.length || 1) - 1)}
+              highContrast={hc}
+            />
+          </div>
+        </div>
+      )}
+      </div>
+
+      {/* Chart / Chords pane switcher (phones) */}
+      {hasAnyChords && (
+        <div className="lg:hidden fixed left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-full border p-0.5 bg-zinc-900/95 border-zinc-700"
+          style={{ bottom: '118px' }}>
+          <button onClick={() => scrollToPane(0)}
+            className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${
+              paneIdx === 0 ? 'bg-white text-black' : 'text-zinc-400'
+            }`}>
+            Chart
+          </button>
+          <button onClick={() => scrollToPane(1)}
+            className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${
+              paneIdx === 1 ? 'bg-white text-black' : 'text-zinc-400'
+            }`}>
+            Chords
+          </button>
+        </div>
+      )}
 
       {/* Fixed bottom controls */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderB} ${bg} px-4 pt-2.5 pb-4`}>

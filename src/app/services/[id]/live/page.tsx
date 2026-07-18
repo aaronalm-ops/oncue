@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import LiveSyncClient from './LiveSyncClient'
+import { fetchServiceChords } from '@/lib/chords/service-chords'
+import { canSeeChords } from '@/lib/chords/access'
 
 export default async function LivePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -9,7 +11,7 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase
     .from('profiles')
-    .select('instrument')
+    .select('instrument, role')
     .eq('id', user!.id)
     .single()
 
@@ -54,6 +56,11 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
     ? profileInstrument
     : (service.instruments[0] ?? null)
 
+  // Chords pane data — gated to editors until the parser rollout opens
+  const chords = canSeeChords(profile?.role)
+    ? await fetchServiceChords(supabase, sortedSongs, user!.id)
+    : { chordsBySongId: {}, prefsByLibraryId: {} }
+
   return (
     <LiveSyncClient
       serviceId={id}
@@ -63,6 +70,8 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
       userInstrument={validatedInstrument}
       initialSongIndex={sessionState?.current_song_index ?? 0}
       initialSectionIndex={sessionState?.current_section_index ?? 0}
+      chordsBySongId={chords.chordsBySongId}
+      prefsByLibraryId={chords.prefsByLibraryId}
     />
   )
 }

@@ -128,6 +128,48 @@ async function main() {
     check(derived.every((s, i) => s.order_index === i), 'derived sections sequentially indexed')
   }
 
+  // ---- Render-safety invariant: rendering NEVER loses lyric text ----
+  // For every content line of every fixture body, the render model's text
+  // parts must reproduce the line exactly (minus the [chord] markers), and
+  // instrumental classification is only allowed when there are no lyrics.
+  console.log('\n=== render-safety invariant (no lyric loss)')
+  const { parseBody } = await import('../src/lib/chords/format')
+  function assertNoTextLoss(body: string, label: string) {
+    const rawLines = body.split('\n')
+    const model = parseBody(body)
+    let checked = 0
+    for (let i = 0; i < rawLines.length && i < model.length; i++) {
+      const raw = rawLines[i].replace(/\s+$/, '')
+      const m = model[i]
+      if (m.type !== 'line') continue
+      const expected = raw.replace(/\[[^\]\n]{1,24}\]/g, '')
+      const rendered = m.parts.map(p => p.text).join('')
+      if (rendered !== expected) {
+        failures++
+        console.error(`  FAIL [${label}] line ${i}: rendered ${JSON.stringify(rendered)} != ${JSON.stringify(expected)}`)
+        return
+      }
+      if (m.instrumental && expected.trim() !== '') {
+        failures++
+        console.error(`  FAIL [${label}] line ${i}: lyric line misclassified as instrumental: ${JSON.stringify(raw)}`)
+        return
+      }
+      checked++
+    }
+    console.log(`  ok ${label}: ${checked} lines render losslessly`)
+  }
+  // The exact regression that shipped broken: all-words-chorded lyric lines
+  assertNoTextLoss('[G]Hallelujah [D]hallelujah [Em]hallelujah [C]hallelujah', 'bridge regression')
+  assertNoTextLoss('[G]God Transcendent, there\'s [G]no one like You', 'tag regression')
+  assertNoTextLoss('[G] [C] [D]', 'true instrumental (allowed)')
+  for (const file of files) {
+    if (SCAN_FILES.has(file)) continue
+    const buf = new Uint8Array(readFileSync(join(DIR, file)))
+    const ex = await extractPdfLines(buf)
+    const parsed = parseChordSheet(ex.lines, file)
+    assertNoTextLoss(parsed.body, file)
+  }
+
   // ---- Transpose unit checks (deterministic music theory) ----
   console.log('\n=== transpose')
   const { transposeChord, transposeBody, reorderBodyToChart } = await import('../src/lib/chords/format')

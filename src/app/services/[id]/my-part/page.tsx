@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import MyPartClient from './MyPartClient'
+import { fetchServiceChords } from '@/lib/chords/service-chords'
+import { canSeeChords } from '@/lib/chords/access'
 
 export default async function MyPartPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -9,7 +11,7 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase
     .from('profiles')
-    .select('instrument')
+    .select('instrument, role')
     .eq('id', user!.id)
     .single()
 
@@ -57,6 +59,11 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
     ? profileInstrument
     : (service.instruments[0] ?? null)
 
+  // Chords pane data — gated to editors until the parser rollout opens
+  const chords = canSeeChords(profile?.role)
+    ? await fetchServiceChords(supabase, sortedSongs, user!.id)
+    : { chordsBySongId: {}, prefsByLibraryId: {} }
+
   return (
     <MyPartClient
       serviceId={id}
@@ -65,6 +72,8 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
       userInstrument={validatedInstrument}
       userId={user!.id}
       initialNotes={notes ?? []}
+      chordsBySongId={chords.chordsBySongId}
+      prefsByLibraryId={chords.prefsByLibraryId}
     />
   )
 }
