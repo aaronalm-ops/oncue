@@ -29,10 +29,21 @@ export default async function LibraryPage() {
     )
   }
 
+  // Pending confirm-queue entries (editors only; table may predate v4 SQL)
+  let pendingUploads: Parameters<typeof LibraryClient>[0]['pendingUploads'] = []
+  if (['master', 'admin', 'worship_leader'].includes(role)) {
+    const { data: uploads } = await supabase
+      .from('chord_uploads')
+      .select('*')
+      .order('created_at', { ascending: true })
+    pendingUploads = (uploads ?? []) as typeof pendingUploads
+  }
+
   return (
     <LibraryClient
       songs={(data ?? []) as Parameters<typeof LibraryClient>[0]['songs']}
       role={role}
+      pendingUploads={pendingUploads}
     />
   )
 }

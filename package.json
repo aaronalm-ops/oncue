@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:parser": "tsx scripts/test-parser.ts"
+    "test:parser": "tsx scripts/test-parser.ts",
+    "test:chords": "tsx scripts/test-chords.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
@@ -17,6 +18,7 @@
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "unpdf": "^1.6.2",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

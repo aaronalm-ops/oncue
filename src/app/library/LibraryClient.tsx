@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { AppRole } from '@/lib/types'
+import ChordUploadQueue, { type PendingUpload } from '@/components/ChordUploadQueue'
 
 interface SongVersion {
   id: string
@@ -23,9 +24,10 @@ interface LibrarySong {
 interface Props {
   songs: LibrarySong[]
   role: AppRole
+  pendingUploads: PendingUpload[]
 }
 
-export default function LibraryClient({ songs: initial, role }: Props) {
+export default function LibraryClient({ songs: initial, role, pendingUploads }: Props) {
   const [songs, setSongs] = useState(initial)
   const [query, setQuery] = useState('')
   const [showAdd, setShowAdd] = useState(false)
@@ -95,6 +97,14 @@ export default function LibraryClient({ songs: initial, role }: Props) {
             </button>
           )}
         </div>
+
+        {/* Bulk chord upload + confirm queue */}
+        {canManage && (
+          <ChordUploadQueue
+            initialUploads={pendingUploads}
+            librarySongs={songs.map(s => ({ id: s.id, title: s.title, artist: s.artist }))}
+          />
+        )}
 
         {/* Search */}
         <div className="relative mb-5">
