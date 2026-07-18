@@ -69,12 +69,27 @@ export default function ServicesClient({
       <div className="text-zinc-500 text-center py-16">
         <p>No services yet.</p>
         {isPrivileged && <p className="text-sm mt-1">Upload a chart to get started.</p>}
+        {isPrivileged && (
+          <Link href="/services/new" className="inline-block mt-3 text-purple-400 text-sm">
+            + Create a setlist before the chart arrives
+          </Link>
+        )}
       </div>
     )
   }
 
   return (
     <div className="space-y-3">
+      {isPrivileged && (
+        <Link href="/services/new"
+          className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700 px-4 py-2.5 text-sm text-zinc-400 active:bg-zinc-900 transition-colors">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          New setlist — before the chart arrives
+        </Link>
+      )}
+
       {/* Search */}
       <div className="relative">
         <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

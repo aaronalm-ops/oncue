@@ -20,6 +20,7 @@ interface Props {
   initialNotes: UserNote[]
   chordsBySongId: Record<string, SongChordsData>
   prefsByLibraryId: Record<string, string>
+  canMapSections: boolean
 }
 
 // Extracted to top-level so it never remounts on parent re-render
@@ -177,7 +178,7 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
   )
 }
 
-export default function MyPartClient({ serviceId, songs, instruments, userInstrument, userId, initialNotes, chordsBySongId, prefsByLibraryId }: Props) {
+export default function MyPartClient({ serviceId, songs, instruments, userInstrument, userId, initialNotes, chordsBySongId, prefsByLibraryId, canMapSections }: Props) {
   const [viewInstrument, setViewInstrument] = useState(userInstrument ?? instruments[0] ?? '')
   const [layout, setLayout] = useState<'song' | 'scroll'>('song')
   const [activeSongIdx, setActiveSongIdx] = useState(0)
@@ -210,6 +211,28 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     const el = swipeRef.current
     if (!el) return
     el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' })
+  }
+
+  // Rolling swipe: at either edge, swiping "past the end" wraps to the other
+  // pane — so either direction always switches, no dead ends.
+  const touchStartRef = useRef<{ x: number; y: number; left: number } | null>(null)
+  function onPaneTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0]
+    touchStartRef.current = { x: t.clientX, y: t.clientY, left: swipeRef.current?.scrollLeft ?? 0 }
+  }
+  function onPaneTouchEnd(e: React.TouchEvent) {
+    const start = touchStartRef.current
+    touchStartRef.current = null
+    const el = swipeRef.current
+    if (!start || !el) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - start.x
+    const dy = t.clientY - start.y
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+    const max = el.scrollWidth - el.clientWidth
+    if (max <= 0) return
+    if (dx > 0 && start.left <= 4) el.scrollTo({ left: max, behavior: 'smooth' })
+    else if (dx < 0 && start.left >= max - 4) el.scrollTo({ left: 0, behavior: 'smooth' })
   }
 
   // Keep refs in sync
@@ -432,6 +455,8 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       <div
         ref={swipeRef}
         onScroll={hasAnyChords ? onSwipeScroll : undefined}
+        onTouchStart={hasAnyChords ? onPaneTouchStart : undefined}
+        onTouchEnd={hasAnyChords ? onPaneTouchEnd : undefined}
         className={`flex-1 min-h-0 ${hasAnyChords
           ? 'flex overflow-x-auto snap-x snap-mandatory no-scrollbar lg:grid lg:grid-cols-2 lg:overflow-x-hidden'
           : 'flex flex-col'}`}
@@ -470,6 +495,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
               userId={userId}
               currentSectionIdx={null}
               highContrast={hc}
+              canMapSections={canMapSections}
             />
           </div>
         </div>

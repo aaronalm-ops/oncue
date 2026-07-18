@@ -29,9 +29,9 @@ export default async function LibraryPage() {
     )
   }
 
-  // Pending confirm-queue entries (editors only; table may predate v4 SQL)
+  // Pending confirm-queue entries — v6: visible to every member (shared queue)
   let pendingUploads: Parameters<typeof LibraryClient>[0]['pendingUploads'] = []
-  if (['master', 'admin', 'worship_leader'].includes(role)) {
+  {
     const { data: uploads } = await supabase
       .from('chord_uploads')
       .select('*')

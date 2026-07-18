@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import ChordSheet from '@/components/ChordSheet'
-import { ALL_KEYS, keyIndex, mapChartSectionsToChords, transposeBody } from '@/lib/chords/format'
+import { ALL_KEYS, deriveSections, keyIndex, mapChartSectionsToChords, normalizeSectionLabelFull, transposeBody } from '@/lib/chords/format'
 import type { SongChordsData } from '@/lib/chords/service-chords'
 
 interface Props {
@@ -15,6 +15,7 @@ interface Props {
   userId: string
   currentSectionIdx: number | null // live position; null = no follow (My Part)
   highContrast: boolean
+  canMapSections?: boolean // editors: allow mapping unmatched chart sections
 }
 
 /**
@@ -23,10 +24,26 @@ interface Props {
  * live section is highlighted and kept in view, and the key strip transposes
  * with the user's per-song preference saved — same behaviour everywhere.
  */
-export default function ChordsPane({ songTitle, chartLabels, chords, songScale, initialKey, userId, currentSectionIdx, highContrast }: Props) {
+export default function ChordsPane({ songTitle, chartLabels, chords, songScale, initialKey, userId, currentSectionIdx, highContrast, canMapSections = false }: Props) {
   const hc = highContrast
   const storedKey = chords?.storedKey ?? null
   const canTranspose = storedKey !== null && keyIndex(storedKey) !== null
+  const [overrides, setOverrides] = useState<Record<string, string>>(chords?.sectionMaps ?? {})
+
+  async function saveMapping(chartLabel: string, chordLabel: string) {
+    if (!chords) return
+    const key = normalizeSectionLabelFull(chartLabel)
+    setOverrides(prev => ({ ...prev, [key]: chordLabel })) // optimistic — applies immediately
+    await fetch('/api/library/section-maps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        library_song_id: chords.librarySongId,
+        chart_label: chartLabel,
+        chord_section_label: chordLabel,
+      }),
+    })
+  }
 
   const [targetKey, setTargetKey] = useState<string>(() => {
     const candidates = [initialKey, songScale, storedKey]
@@ -55,8 +72,13 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
   }
 
   const mapped = useMemo(
-    () => (chords ? mapChartSectionsToChords(chords.body, chartLabels) : null),
-    [chords, chartLabels],
+    () => (chords ? mapChartSectionsToChords(chords.body, chartLabels, overrides) : null),
+    [chords, chartLabels, overrides],
+  )
+
+  const chordSectionLabels = useMemo(
+    () => (chords ? [...new Set(deriveSections(chords.body).map(s => s.label))] : []),
+    [chords],
   )
 
   const transpose = useMemo(() => {
@@ -126,6 +148,17 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
               </p>
               {sec.content ? (
                 <ChordSheet body={transpose(sec.content)} highContrast={hc} compact />
+              ) : canMapSections && chordSectionLabels.length > 0 ? (
+                <select
+                  defaultValue=""
+                  onChange={e => { if (e.target.value) saveMapping(sec.label, e.target.value) }}
+                  className={`text-xs rounded-lg px-2 py-1.5 border focus:outline-none ${
+                    hc ? 'bg-white border-zinc-300 text-zinc-700' : 'bg-zinc-900 border-zinc-700 text-zinc-400'
+                  }`}
+                >
+                  <option value="">map to a sheet section…</option>
+                  {chordSectionLabels.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
               ) : (
                 <p className={`text-xs ${hc ? 'text-zinc-400' : 'text-zinc-700'}`}>—</p>
               )}

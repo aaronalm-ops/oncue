@@ -8,8 +8,7 @@ export default async function VersionEditorPage({ params }: { params: Promise<{ 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login')
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (!['master', 'admin', 'worship_leader'].includes(profile?.role ?? '')) redirect(`/library/${id}`)
+  // v6: every member can review and correct chords
 
   const { data: song } = await supabase.from('library_songs').select('id, title, artist').eq('id', id).single()
   if (!song) notFound()

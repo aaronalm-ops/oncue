@@ -40,7 +40,10 @@ export default function LibraryClient({ songs: initial, role, pendingUploads }: 
   const [bulkDeleting, setBulkDeleting] = useState(false)
   const router = useRouter()
 
-  const canManage = role !== 'member'
+  // v6: every member can contribute (upload, add, correct).
+  // Destructive bulk delete stays with editors.
+  const canManage = true
+  const canBulkDelete = role !== 'member'
 
   function toggleSelected(id: string) {
     setSelected(prev => {
@@ -125,7 +128,7 @@ export default function LibraryClient({ songs: initial, role, pendingUploads }: 
           </div>
           {canManage && (
             <div className="flex items-center gap-2">
-              {songs.length > 0 && (
+              {canBulkDelete && songs.length > 0 && (
                 <button
                   onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
                   className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-colors ${

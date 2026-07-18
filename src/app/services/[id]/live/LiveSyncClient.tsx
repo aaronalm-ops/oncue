@@ -4,7 +4,16 @@ import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import ChordsPane from '@/components/ChordsPane'
+import ChordSheetViewer from '@/components/ChordSheetViewer'
 import type { SongChordsData } from '@/lib/chords/service-chords'
+
+interface ImpromptuShare {
+  librarySongId: string
+  title: string
+  storedKey: string | null
+  body: string
+  sharedKey: string | null
+}
 
 interface Instruction { id: string; instrument: string; text: string; is_intro: boolean }
 interface Section { id: string; order_index: number; label: string; comments: string; instructions: Instruction[] }
@@ -20,9 +29,11 @@ interface Props {
   initialSectionIndex: number
   chordsBySongId: Record<string, SongChordsData>
   prefsByLibraryId: Record<string, string>
+  canMapSections: boolean
+  initialImpromptu: ImpromptuShare | null
 }
 
-export default function LiveSyncClient({ serviceId, userId, songs, instruments, userInstrument, initialSongIndex, initialSectionIndex, chordsBySongId, prefsByLibraryId }: Props) {
+export default function LiveSyncClient({ serviceId, userId, songs, instruments, userInstrument, initialSongIndex, initialSectionIndex, chordsBySongId, prefsByLibraryId, canMapSections, initialImpromptu }: Props) {
   const [songIdx, setSongIdx] = useState(initialSongIndex)
   const [sectionIdx, setSectionIdx] = useState(initialSectionIndex)
   const [highContrast, setHighContrast] = useState(false)
@@ -34,6 +45,47 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   const [syncStatus, setSyncStatus] = useState<'live' | 'reconnecting' | 'offline'>('live')
   const [paneIdx, setPaneIdx] = useState(0) // 0 = chart, 1 = chords (phone swipe)
   const swipeRef = useRef<HTMLDivElement | null>(null)
+  const [impromptu, setImpromptu] = useState<ImpromptuShare | null>(initialImpromptu)
+  const impromptuRef = useRef<string | null>(initialImpromptu?.librarySongId ?? null)
+  const [endingImpromptu, setEndingImpromptu] = useState(false)
+
+  // A library song was pushed live mid-service — fetch its sheet and overlay it
+  async function applyImpromptu(libId: string | null, sharedKey: string | null) {
+    if (libId === impromptuRef.current) return
+    impromptuRef.current = libId
+    if (libId === null) {
+      setImpromptu(null)
+      return
+    }
+    const client = getClient()
+    const [{ data: libSong }, { data: versions }] = await Promise.all([
+      client.from('library_songs').select('title').eq('id', libId).single(),
+      client
+        .from('song_versions')
+        .select('stored_key, content_chordpro')
+        .eq('library_song_id', libId)
+        .not('reviewed_at', 'is', null)
+        .order('reviewed_at', { ascending: false })
+        .limit(1),
+    ])
+    const v = versions?.[0]
+    if (libSong && v?.content_chordpro && impromptuRef.current === libId) {
+      setImpromptu({ librarySongId: libId, title: libSong.title, storedKey: v.stored_key, body: v.content_chordpro, sharedKey })
+    }
+  }
+
+  async function endImpromptu() {
+    setEndingImpromptu(true)
+    await getClient().from('session_state').update({
+      impromptu_library_song_id: null,
+      impromptu_key: null,
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
+    }).eq('service_id', serviceId)
+    setEndingImpromptu(false)
+    impromptuRef.current = null
+    setImpromptu(null)
+  }
 
   const hasAnyChords = songs.some(s => chordsBySongId[s.id])
 
@@ -47,6 +99,28 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     const el = swipeRef.current
     if (!el) return
     el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' })
+  }
+
+  // Rolling swipe: at either edge, swiping "past the end" wraps to the other
+  // pane — so either direction always switches, no dead ends.
+  const touchStartRef = useRef<{ x: number; y: number; left: number } | null>(null)
+  function onPaneTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0]
+    touchStartRef.current = { x: t.clientX, y: t.clientY, left: swipeRef.current?.scrollLeft ?? 0 }
+  }
+  function onPaneTouchEnd(e: React.TouchEvent) {
+    const start = touchStartRef.current
+    touchStartRef.current = null
+    const el = swipeRef.current
+    if (!start || !el) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - start.x
+    const dy = t.clientY - start.y
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.2) return
+    const max = el.scrollWidth - el.clientWidth
+    if (max <= 0) return
+    if (dx > 0 && start.left <= 4) el.scrollTo({ left: max, behavior: 'smooth' }) // back past first → last
+    else if (dx < 0 && start.left >= max - 4) el.scrollTo({ left: 0, behavior: 'smooth' }) // forward past last → first
   }
 
   function toggleFullscreen() {
@@ -136,12 +210,16 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     async function refetchState() {
       const { data } = await getClient()
         .from('session_state')
-        .select('current_song_index, current_section_index')
+        .select('current_song_index, current_section_index, impromptu_library_song_id, impromptu_key')
         .eq('service_id', serviceId)
         .single()
       if (data) {
         setSongIdx(data.current_song_index)
         setSectionIdx(data.current_section_index)
+        applyImpromptu(
+          (data as { impromptu_library_song_id?: string | null }).impromptu_library_song_id ?? null,
+          (data as { impromptu_key?: string | null }).impromptu_key ?? null,
+        )
       }
     }
 
@@ -154,7 +232,17 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           table: 'session_state',
           filter: `service_id=eq.${serviceId}`,
         }, payload => {
-          const state = payload.new as { current_song_index?: number; current_section_index?: number; updated_by?: string | null }
+          const state = payload.new as {
+            current_song_index?: number
+            current_section_index?: number
+            updated_by?: string | null
+            impromptu_library_song_id?: string | null
+            impromptu_key?: string | null
+          }
+          // Impromptu changes apply for everyone, even our own echo (harmless no-op)
+          if ('impromptu_library_song_id' in state) {
+            applyImpromptu(state.impromptu_library_song_id ?? null, state.impromptu_key ?? null)
+          }
           if (state.updated_by === userId) return // own move, already applied locally
           if (typeof state.current_song_index === 'number' && typeof state.current_section_index === 'number') {
             setSongIdx(state.current_song_index)
@@ -288,10 +376,34 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
         )}
       </button>
 
+      {impromptu ? (
+        /* Impromptu live share overlays the chart until anyone ends it */
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
+            <div className={`mb-3 rounded-xl px-3 py-2.5 border ${hc ? 'bg-amber-100 border-amber-300' : 'bg-amber-950/60 border-amber-900'}`}>
+              <p className={`text-[10px] font-bold uppercase tracking-widest ${hc ? 'text-amber-700' : 'text-amber-400'}`}>
+                ● Impromptu — shared live
+              </p>
+              <p className={`text-lg font-bold leading-tight ${fg}`}>{impromptu.title}</p>
+            </div>
+            <ChordSheetViewer
+              key={impromptu.librarySongId}
+              body={impromptu.body}
+              storedKey={impromptu.storedKey}
+              initialKey={prefsByLibraryId[impromptu.librarySongId] ?? impromptu.sharedKey}
+              librarySongId={impromptu.librarySongId}
+              userId={userId}
+              highContrast={hc}
+            />
+          </div>
+        </div>
+      ) : (<>
       {/* Main content — swipe between Chart and Chords on phones; side-by-side on large screens */}
       <div
         ref={swipeRef}
         onScroll={hasAnyChords ? onSwipeScroll : undefined}
+        onTouchStart={hasAnyChords ? onPaneTouchStart : undefined}
+        onTouchEnd={hasAnyChords ? onPaneTouchEnd : undefined}
         className={`flex-1 min-h-0 ${hasAnyChords
           ? 'flex overflow-x-auto snap-x snap-mandatory no-scrollbar lg:grid lg:grid-cols-2 lg:overflow-x-hidden'
           : 'flex flex-col'}`}
@@ -388,6 +500,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
               userId={userId}
               currentSectionIdx={Math.min(sectionIdx, (currentSong.sections.length || 1) - 1)}
               highContrast={hc}
+              canMapSections={canMapSections}
             />
           </div>
         </div>
@@ -412,6 +525,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           </button>
         </div>
       )}
+      </>)}
 
       {/* Fixed bottom controls */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderB} ${bg} px-4 pt-2.5 pb-4`}>

@@ -297,7 +297,16 @@ export interface ChartChordsMap {
   matched: number
 }
 
-export function mapChartSectionsToChords(body: string, chartLabels: string[]): ChartChordsMap {
+/**
+ * `overrides`: manual chart→chord section maps (chart label normalized-full →
+ * chord section label), set by editors when auto-matching can't work
+ * (e.g. chart "INSTRUMENTAL SOLO" → sheet "Interlude"). Highest precedence.
+ */
+export function mapChartSectionsToChords(
+  body: string,
+  chartLabels: string[],
+  overrides?: Record<string, string>,
+): ChartChordsMap {
   const chordSections = deriveSections(body)
   const byFull = new Map<string, DerivedSection[]>()
   const byBase = new Map<string, DerivedSection[]>()
@@ -315,9 +324,19 @@ export function mapChartSectionsToChords(body: string, chartLabels: string[]): C
   const sections: ChartSectionChords[] = chartLabels.map(chartLabel => {
     const full = normalizeSectionLabelFull(chartLabel)
     const base = normalizeSectionLabel(chartLabel)
-    const pool = byFull.get(full)?.length ? byFull.get(full)! : (byBase.get(base) ?? [])
+
+    // Manual override first
+    const mappedLabel = overrides?.[full]
+    let pool: DerivedSection[] = []
+    if (mappedLabel !== undefined) {
+      pool = byFull.get(normalizeSectionLabelFull(mappedLabel)) ?? []
+    }
+    if (pool.length === 0) {
+      pool = byFull.get(full)?.length ? byFull.get(full)! : (byBase.get(base) ?? [])
+    }
     if (pool.length === 0) return { label: chartLabel, content: null }
-    const cursorKey = pool === byFull.get(full) ? `f:${full}` : `b:${base}`
+
+    const cursorKey = `p:${normalizeSectionLabelFull(pool[0].label)}`
     const cursor = cursors.get(cursorKey) ?? 0
     const section = pool[cursor % pool.length]
     cursors.set(cursorKey, cursor + 1)

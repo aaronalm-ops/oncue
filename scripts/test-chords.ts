@@ -194,6 +194,17 @@ async function main() {
   const r2 = reorderBodyToChart(body, ['SOMETHING', 'ELSE'])
   check(r2.matched === 0 && r2.body === body, 'no matches → original body untouched')
 
+  // ---- Manual section-map overrides ----
+  console.log('\n=== section-map overrides')
+  const { mapChartSectionsToChords, normalizeSectionLabelFull } = await import('../src/lib/chords/format')
+  const m1 = mapChartSectionsToChords(body, ['INSTRUMENTAL SOLO'])
+  check(m1.sections[0].content === null, 'unmapped chart label has no content')
+  const m2 = mapChartSectionsToChords(body, ['INSTRUMENTAL SOLO'], {
+    [normalizeSectionLabelFull('INSTRUMENTAL SOLO')]: 'Bridge',
+  })
+  check(m2.sections[0].content === 'B-line', 'override maps chart label to the chosen sheet section')
+  check(m2.sections[0].label === 'INSTRUMENTAL SOLO', 'chart wording stays as the header')
+
   console.log(failures === 0 ? '\nAll chord checks passed.' : `\n${failures} chord check(s) FAILED.`)
   process.exit(failures === 0 ? 0 : 1)
 }

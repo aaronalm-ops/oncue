@@ -10,6 +10,8 @@ export interface SongChordsData {
   librarySongId: string
   storedKey: string | null
   body: string
+  /** manual chart→chord section maps (chart label normalized → chord section label) */
+  sectionMaps: Record<string, string>
 }
 
 export interface ServiceChords {
@@ -58,11 +60,24 @@ export async function fetchServiceChords(
     if (!latestByLib.has(v.library_song_id)) latestByLib.set(v.library_song_id, v)
   }
 
-  const { data: prefs } = await supabase
-    .from('user_scale_preferences')
-    .select('library_song_id, preferred_key')
-    .eq('user_id', userId)
-    .in('library_song_id', libIds)
+  const [{ data: prefs }, { data: maps }] = await Promise.all([
+    supabase
+      .from('user_scale_preferences')
+      .select('library_song_id, preferred_key')
+      .eq('user_id', userId)
+      .in('library_song_id', libIds),
+    supabase
+      .from('chord_section_maps')
+      .select('library_song_id, chart_label_normalized, chord_section_label')
+      .in('library_song_id', libIds),
+  ])
+
+  const mapsByLib = new Map<string, Record<string, string>>()
+  for (const m of maps ?? []) {
+    const rec = mapsByLib.get(m.library_song_id) ?? {}
+    rec[m.chart_label_normalized] = m.chord_section_label
+    mapsByLib.set(m.library_song_id, rec)
+  }
 
   const chordsBySongId: Record<string, SongChordsData> = {}
   for (const [songId, libId] of songToLib) {
@@ -72,6 +87,7 @@ export async function fetchServiceChords(
         librarySongId: libId,
         storedKey: v.stored_key,
         body: v.content_chordpro,
+        sectionMaps: mapsByLib.get(libId) ?? {},
       }
     }
   }

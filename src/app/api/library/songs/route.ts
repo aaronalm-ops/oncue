@@ -20,12 +20,7 @@ export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  // Allowlist — a missing profile row must NOT grant access
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-  if (!profile || !['master', 'admin', 'worship_leader'].includes(profile.role ?? '')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+  // v6: any member can add library songs; bulk DELETE below stays editor-only
 
   const { title, artist } = await request.json() as { title: string; artist?: string }
   if (!title?.trim()) return NextResponse.json({ error: 'Title is required' }, { status: 400 })

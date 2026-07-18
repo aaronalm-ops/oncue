@@ -19,7 +19,9 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
     .single()
   if (!song) notFound()
 
-  const canManage = ['master', 'admin', 'worship_leader'].includes(role)
+  // v6: every member can contribute — see unreviewed versions, edit, review
+  void role
+  const canManage = true
 
   // The user's saved key preference for this song (drives the transpose default)
   const { data: pref } = await supabase

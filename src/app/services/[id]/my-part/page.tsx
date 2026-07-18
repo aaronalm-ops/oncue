@@ -25,7 +25,7 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
   const { data: songs } = await supabase
     .from('songs')
     .select(`
-      id, order_index, title, scale, medley_group, reference_links,
+      id, order_index, title, scale, medley_group, reference_links, in_chart,
       sections (
         id, order_index, label, comments,
         instructions ( id, instrument, text, is_intro )
@@ -34,7 +34,8 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
     .eq('service_id', id)
     .order('order_index')
 
-  const sortedSongs = (songs ?? []).map(song => ({
+  // The chart directs the flow — songs dropped by the chart stay out of My Part
+  const sortedSongs = (songs ?? []).filter(s => s.in_chart !== false).map(song => ({
     ...song,
     sections: (song.sections ?? [])
       .sort((a, b) => a.order_index - b.order_index)
@@ -64,6 +65,8 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
     ? await fetchServiceChords(supabase, sortedSongs, user!.id)
     : { chordsBySongId: {}, prefsByLibraryId: {} }
 
+  const isEditor = true // v6: any member can map sections
+
   return (
     <MyPartClient
       serviceId={id}
@@ -74,6 +77,7 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
       initialNotes={notes ?? []}
       chordsBySongId={chords.chordsBySongId}
       prefsByLibraryId={chords.prefsByLibraryId}
+      canMapSections={isEditor}
     />
   )
 }

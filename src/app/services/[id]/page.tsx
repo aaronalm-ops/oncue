@@ -42,10 +42,10 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   const { data: songs } = chordsVisible
     ? await supabase
         .from('songs')
-        .select('id, order_index, title, scale')
+        .select('id, order_index, title, scale, in_chart')
         .eq('service_id', id)
         .order('order_index')
-    : { data: [] as { id: string; order_index: number; title: string; scale: string | null }[] }
+    : { data: [] as { id: string; order_index: number; title: string; scale: string | null; in_chart: boolean }[] }
 
   const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
   const songIds = (songs ?? []).map(s => s.id)
@@ -146,6 +146,9 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
                     className="flex items-center gap-3 bg-zinc-900 rounded-xl px-4 py-3 active:bg-zinc-800 transition-colors border border-zinc-800/50"
                   >
                     <span className="flex-1 min-w-0 text-sm font-medium truncate">{s.title}</span>
+                    {s.in_chart === false && (
+                      <span className="shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-amber-950 text-amber-500 border border-amber-900">not in chart</span>
+                    )}
                     {s.scale && (
                       <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded bg-purple-600 text-white">{s.scale}</span>
                     )}
