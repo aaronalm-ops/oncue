@@ -35,9 +35,47 @@ export default function LibraryClient({ songs: initial, role, pendingUploads }: 
   const [newArtist, setNewArtist] = useState('')
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const router = useRouter()
 
   const canManage = role !== 'member'
+
+  function toggleSelected(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false)
+    setSelected(new Set())
+  }
+
+  async function bulkDelete() {
+    if (selected.size === 0) return
+    const n = selected.size
+    if (!window.confirm(`Delete ${n} song${n === 1 ? '' : 's'} and all their chord versions? This also removes their stored PDFs and any links to services. This cannot be undone.`)) return
+    setBulkDeleting(true)
+    const res = await fetch('/api/library/songs', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [...selected] }),
+    })
+    setBulkDeleting(false)
+    if (res.ok) {
+      setSongs(prev => prev.filter(s => !selected.has(s.id)))
+      exitSelectMode()
+      router.refresh()
+    } else {
+      const data = await res.json()
+      window.alert(data.error ?? 'Delete failed')
+    }
+  }
 
   const filtered = songs.filter(s =>
     query.trim() === '' ||
@@ -86,15 +124,29 @@ export default function LibraryClient({ songs: initial, role, pendingUploads }: 
             <h1 className="text-xl font-bold tracking-tight">Chords Library</h1>
           </div>
           {canManage && (
-            <button
-              onClick={() => setShowAdd(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 text-white text-sm font-semibold active:bg-purple-700 transition-colors"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add Song
-            </button>
+            <div className="flex items-center gap-2">
+              {songs.length > 0 && (
+                <button
+                  onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+                  className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-colors ${
+                    selectMode ? 'bg-white text-black' : 'bg-zinc-900 border border-zinc-800 text-zinc-400'
+                  }`}
+                >
+                  {selectMode ? 'Done' : 'Select'}
+                </button>
+              )}
+              {!selectMode && (
+                <button
+                  onClick={() => setShowAdd(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-purple-600 text-white text-sm font-semibold active:bg-purple-700 transition-colors"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add Song
+                </button>
+              )}
+            </div>
           )}
         </div>
 
@@ -137,12 +189,20 @@ export default function LibraryClient({ songs: initial, role, pendingUploads }: 
             {filtered.map(song => {
               const reviewedCount = song.song_versions.filter(v => v.reviewed_at).length
               const totalVersions = song.song_versions.length
-              return (
-                <Link
-                  key={song.id}
-                  href={`/library/${song.id}`}
-                  className="bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3.5 flex items-center gap-3 active:bg-zinc-800 transition-colors"
-                >
+              const isSelected = selected.has(song.id)
+              const inner = (
+                <>
+                  {selectMode && (
+                    <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
+                      isSelected ? 'bg-purple-600 border-purple-600' : 'border-zinc-600'
+                    }`}>
+                      {isSelected && (
+                        <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </span>
+                  )}
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-sm truncate">{song.title}</p>
                     {song.artist && <p className="text-xs text-zinc-500 mt-0.5 truncate">{song.artist}</p>}
@@ -160,12 +220,47 @@ export default function LibraryClient({ songs: initial, role, pendingUploads }: 
                       <span className="text-xs text-zinc-700">No chords</span>
                     )}
                   </div>
-                  <svg className="w-4 h-4 text-zinc-700 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
+                  {!selectMode && (
+                    <svg className="w-4 h-4 text-zinc-700 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  )}
+                </>
+              )
+              const rowClass = `bg-zinc-900 border rounded-2xl px-4 py-3.5 flex items-center gap-3 transition-colors ${
+                selectMode && isSelected ? 'border-purple-600' : 'border-zinc-800 active:bg-zinc-800'
+              }`
+              return selectMode ? (
+                <button key={song.id} onClick={() => toggleSelected(song.id)} className={`${rowClass} text-left w-full`}>
+                  {inner}
+                </button>
+              ) : (
+                <Link key={song.id} href={`/library/${song.id}`} className={rowClass}>
+                  {inner}
                 </Link>
               )
             })}
+          </div>
+        )}
+
+        {/* Bulk-delete bar */}
+        {selectMode && (
+          <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-zinc-800 bg-black px-4 pt-3 pb-5">
+            <div className="max-w-lg mx-auto flex items-center gap-3">
+              <p className="text-sm text-zinc-400 flex-1">
+                {selected.size === 0 ? 'Tap songs to select' : `${selected.size} selected`}
+              </p>
+              <button onClick={exitSelectMode} className="px-4 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 text-sm">
+                Cancel
+              </button>
+              <button
+                onClick={bulkDelete}
+                disabled={selected.size === 0 || bulkDeleting}
+                className="px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold disabled:opacity-40 active:scale-95 transition-transform"
+              >
+                {bulkDeleting ? 'Deleting…' : `Delete${selected.size > 0 ? ` (${selected.size})` : ''}`}
+              </button>
+            </div>
           </div>
         )}
       </div>

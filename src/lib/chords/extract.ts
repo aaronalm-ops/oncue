@@ -1,12 +1,27 @@
 /**
- * Coordinate-aware PDF text extraction (server-side only).
+ * Coordinate-aware PDF text banding.
  *
  * PDFs do NOT store text in reading order — WHO IS THIS KING CHORDS.pdf
  * extracts its lyrics divorced from their chords and its title last.
- * We therefore read every text item's x/y position and font size,
- * rebuild lines by y-band per page, and order words by x within a line.
+ * We read every text item's x/y position and font size, rebuild lines by
+ * y-band per page, and order words by x within a line.
+ *
+ * The banding logic here is PURE — it runs on generic positioned items.
+ * The actual PDF reading happens in the BROWSER (extract-client.ts): the
+ * uploader's own machine always renders fonts correctly, whereas serverless
+ * runtimes drop text runs when embedded/standard fonts fail to load. Server
+ * code must never parse PDFs directly. (Node-side reading exists only for
+ * the test harness, via scripts/test-chords.ts.)
  */
-import { getDocumentProxy } from 'unpdf'
+
+export interface RawItem {
+  str: string
+  x: number
+  y: number // top-origin
+  width: number
+  fontSize: number
+  page: number
+}
 
 export interface PositionedWord {
   str: string
@@ -29,47 +44,24 @@ export interface ExtractResult {
   hasTextLayer: boolean
 }
 
-interface RawItem {
-  str: string
-  x: number
-  y: number // top-origin
-  width: number
-  fontSize: number
-}
-
-export async function extractPdfLines(buffer: Uint8Array): Promise<ExtractResult> {
-  const pdf = await getDocumentProxy(buffer)
+/** Group positioned items into visual lines. Pure and deterministic. */
+export function bandItemsToLines(items: RawItem[], pageCount: number): ExtractResult {
   const lines: PositionedLine[] = []
   let totalChars = 0
 
-  for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p)
-    const viewport = page.getViewport({ scale: 1 })
-    const content = await page.getTextContent()
+  const pages = new Map<number, RawItem[]>()
+  for (const it of items) {
+    if (!it.str || !it.str.trim()) continue
+    totalChars += it.str.trim().length
+    const arr = pages.get(it.page) ?? []
+    arr.push(it)
+    pages.set(it.page, arr)
+  }
 
-    const items: RawItem[] = []
-    for (const it of content.items as Array<{
-      str: string
-      transform: number[]
-      width: number
-      height: number
-    }>) {
-      if (!it.str || !it.str.trim()) continue
-      // transform = [scaleX, skewY, skewX, scaleY, x, y(bottom-origin)]
-      const fontSize = Math.hypot(it.transform[2], it.transform[3])
-      items.push({
-        str: it.str,
-        x: it.transform[4],
-        y: viewport.height - it.transform[5], // flip to top-origin
-        width: it.width,
-        fontSize: fontSize || Math.abs(it.height) || 10,
-      })
-      totalChars += it.str.trim().length
-    }
+  for (const p of [...pages.keys()].sort((a, b) => a - b)) {
+    const pageItems = pages.get(p)!
+    pageItems.sort((a, b) => a.y - b.y || a.x - b.x)
 
-    // Group into lines by y-band: items whose baselines sit within half a
-    // font-size of each other are the same visual line.
-    items.sort((a, b) => a.y - b.y || a.x - b.x)
     let band: RawItem[] = []
     let bandY = Number.NEGATIVE_INFINITY
 
@@ -113,7 +105,7 @@ export async function extractPdfLines(buffer: Uint8Array): Promise<ExtractResult
       band = []
     }
 
-    for (const it of items) {
+    for (const it of pageItems) {
       const tol = Math.max(it.fontSize, band.length ? band[0].fontSize : it.fontSize) * 0.6
       if (band.length === 0 || Math.abs(it.y - bandY) <= tol) {
         if (band.length === 0) bandY = it.y
@@ -129,7 +121,7 @@ export async function extractPdfLines(buffer: Uint8Array): Promise<ExtractResult
 
   return {
     lines,
-    pageCount: pdf.numPages,
+    pageCount,
     hasTextLayer: totalChars >= 40, // a scan yields ~0; a real sheet yields hundreds
   }
 }
@@ -154,12 +146,27 @@ function joinWithColumns(words: PositionedWord[], fontSize: number): string {
   return out
 }
 
-/** Character-column position of each word for chord→lyric alignment. */
-export function wordColumns(line: PositionedLine): { str: string; col: number }[] {
-  const em = Math.max(line.fontSize * 0.5, 3)
-  const startX = line.words.length ? line.words[0].x : 0
-  return line.words.map(w => ({
-    str: w.str,
-    col: Math.max(0, Math.round((w.x - startX) / em)),
-  }))
+/**
+ * Convert pdf.js textContent items (from any runtime) into RawItems.
+ * `viewportHeight` flips pdf.js's bottom-origin y to top-origin.
+ */
+export function pdfTextItemsToRaw(
+  items: Array<{ str: string; transform: number[]; width: number; height: number }>,
+  viewportHeight: number,
+  page: number,
+): RawItem[] {
+  const out: RawItem[] = []
+  for (const it of items) {
+    if (!it.str || !it.str.trim()) continue
+    const fontSize = Math.hypot(it.transform[2], it.transform[3])
+    out.push({
+      str: it.str,
+      x: it.transform[4],
+      y: viewportHeight - it.transform[5],
+      width: it.width,
+      fontSize: fontSize || Math.abs(it.height) || 10,
+      page,
+    })
+  }
+  return out
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { parseBody, type BodyLine } from '@/lib/chords/format'
+import { parseBody, isChordToken, type BodyLine } from '@/lib/chords/format'
 
 interface Props {
   body: string
@@ -53,7 +53,7 @@ function Line({ line, hc }: { line: BodyLine; hc: boolean }) {
     return (
       <p className="flex flex-wrap gap-x-2 gap-y-1">
         {line.parts.filter(p => p.chord).map((p, i) => (
-          <span key={i} className={`font-bold ${hc ? 'text-black' : 'text-amber-300'}`}>{p.chord}</span>
+          <ChordBadge key={i} chord={p.chord!} hc={hc} size="base" />
         ))}
       </p>
     )
@@ -64,14 +64,26 @@ function Line({ line, hc }: { line: BodyLine; hc: boolean }) {
     <p className="flex flex-wrap items-end" dir="auto">
       {line.parts.map((p, i) => (
         <span key={i} className="inline-flex flex-col items-start whitespace-pre-wrap">
-          {p.chord !== null && (
-            <span className={`text-[11px] font-bold leading-none mb-0.5 ${hc ? 'text-black' : 'text-amber-300'}`}>
-              {p.chord}
-            </span>
-          )}
+          {p.chord !== null && <ChordBadge chord={p.chord} hc={hc} size="sm" />}
           <span className={hc ? 'text-zinc-900' : 'text-zinc-100'}>{p.text || ' '}</span>
         </span>
       ))}
     </p>
+  )
+}
+
+/** Unrecognised chord tokens get a dotted underline — visibly "not understood",
+ *  never silently transposed wrong. */
+function ChordBadge({ chord, hc, size }: { chord: string; hc: boolean; size: 'sm' | 'base' }) {
+  const known = isChordToken(chord)
+  return (
+    <span
+      className={`font-bold ${size === 'sm' ? 'text-[11px] leading-none mb-0.5' : ''} ${
+        hc ? 'text-black' : 'text-amber-300'
+      } ${known ? '' : 'underline decoration-dotted decoration-red-400 underline-offset-2'}`}
+      title={known ? undefined : 'Unrecognised chord — not transposed'}
+    >
+      {chord}
+    </span>
   )
 }

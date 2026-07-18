@@ -35,6 +35,39 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   const gradient = DAY_GRADIENT[service.day_of_week] ?? 'from-zinc-900/30 to-transparent'
   const badge = DAY_BADGE[service.day_of_week] ?? 'bg-zinc-800 text-zinc-400 border-zinc-700'
 
+  // Which songs have chords available (via confirmed link, or title match)?
+  const { data: songs } = await supabase
+    .from('songs')
+    .select('id, order_index, title, scale')
+    .eq('service_id', id)
+    .order('order_index')
+
+  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+  const songIds = (songs ?? []).map(s => s.id)
+  const [{ data: links }, { data: librarySongs }] = await Promise.all([
+    songIds.length
+      ? supabase.from('song_links').select('song_id, library_song_id').in('song_id', songIds)
+      : Promise.resolve({ data: [] as { song_id: string; library_song_id: string }[] }),
+    supabase.from('library_songs').select('id, title, song_versions(id, reviewed_at)'),
+  ])
+  const linkMap = new Map((links ?? []).map(l => [l.song_id, l.library_song_id]))
+  const reviewedLib = new Map(
+    (librarySongs ?? [])
+      .filter(ls => (ls.song_versions ?? []).some(v => v.reviewed_at !== null))
+      .map(ls => [norm(ls.title), ls.id]),
+  )
+  const reviewedLibIds = new Set(
+    (librarySongs ?? [])
+      .filter(ls => (ls.song_versions ?? []).some(v => v.reviewed_at !== null))
+      .map(ls => ls.id),
+  )
+  const songChords = (songs ?? []).map(s => {
+    const linked = linkMap.get(s.id)
+    const libId = linked && reviewedLibIds.has(linked) ? linked : reviewedLib.get(norm(s.title)) ?? null
+    return { ...s, hasChords: libId !== null }
+  })
+  const anyChords = songChords.some(s => s.hasChords)
+
   return (
     <div className="min-h-screen bg-black text-white">
       <div className="max-w-lg mx-auto px-4 pt-12 pb-24 space-y-8">
@@ -95,6 +128,36 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
             </Link>
           )}
         </div>
+
+        {anyChords && (
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-600 mb-2">Song chords</p>
+            <div className="space-y-1.5">
+              {songChords.map(s => (
+                s.hasChords ? (
+                  <Link
+                    key={s.id}
+                    href={`/services/${id}/chords/${s.id}`}
+                    className="flex items-center gap-3 bg-zinc-900 rounded-xl px-4 py-3 active:bg-zinc-800 transition-colors border border-zinc-800/50"
+                  >
+                    <span className="flex-1 min-w-0 text-sm font-medium truncate">{s.title}</span>
+                    {s.scale && (
+                      <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded bg-purple-600 text-white">{s.scale}</span>
+                    )}
+                    <svg className="w-4 h-4 text-zinc-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </Link>
+                ) : (
+                  <div key={s.id} className="flex items-center gap-3 rounded-xl px-4 py-3 border border-zinc-900">
+                    <span className="flex-1 min-w-0 text-sm text-zinc-600 truncate">{s.title}</span>
+                    <span className="shrink-0 text-[10px] text-zinc-700">no chords</span>
+                  </div>
+                )
+              ))}
+            </div>
+          </div>
+        )}
 
         <a
           href={`/api/services/${id}/download`}

@@ -21,6 +21,14 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
 
   const canManage = ['master', 'admin', 'worship_leader'].includes(role)
 
+  // The user's saved key preference for this song (drives the transpose default)
+  const { data: pref } = await supabase
+    .from('user_scale_preferences')
+    .select('preferred_key')
+    .eq('user_id', user.id)
+    .eq('library_song_id', id)
+    .maybeSingle()
+
   const versions = (song.song_versions ?? [])
     // members only ever receive reviewed versions (RLS enforces this too)
     .filter(v => canManage || v.reviewed_at !== null)
@@ -40,6 +48,8 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
       song={{ id: song.id, title: song.title, artist: song.artist }}
       versions={versions}
       canManage={canManage}
+      userId={user.id}
+      preferredKey={pref?.preferred_key ?? null}
     />
   )
 }

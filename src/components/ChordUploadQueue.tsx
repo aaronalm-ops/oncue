@@ -84,11 +84,23 @@ export default function ChordUploadQueue({ initialUploads, librarySongs }: Props
     setUploadErrors([])
     const errs: string[] = []
 
+    // Lazy-load the browser PDF extractor once per batch
+    const { extractPdfInBrowser } = await import('@/lib/chords/extract-client')
+
     for (let i = 0; i < files.length; i++) {
       setProgress({ current: i + 1, total: files.length })
       const formData = new FormData()
       formData.append('file', files[i])
       try {
+        // Extract text in the browser — fonts always resolve here, unlike serverless
+        try {
+          const extracted = await extractPdfInBrowser(files[i])
+          formData.append('lines', JSON.stringify(extracted.lines))
+          formData.append('has_text_layer', String(extracted.hasTextLayer))
+        } catch {
+          formData.append('lines', '')
+          formData.append('has_text_layer', 'false')
+        }
         const res = await fetch('/api/library/uploads', { method: 'POST', body: formData })
         const data = await res.json()
         if (!res.ok) {

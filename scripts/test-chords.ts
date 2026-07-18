@@ -4,9 +4,30 @@
  */
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
-import { extractPdfLines } from '../src/lib/chords/extract'
+import { bandItemsToLines, pdfTextItemsToRaw, type ExtractResult, type RawItem } from '../src/lib/chords/extract'
 import { parseChordSheet } from '../src/lib/chords/parse'
 import { deriveSections } from '../src/lib/chords/format'
+
+/**
+ * Node-side PDF reading for tests only. In the app, extraction runs in the
+ * BROWSER (extract-client.ts) because serverless font handling drops text.
+ */
+async function extractPdfLines(buf: Uint8Array): Promise<ExtractResult> {
+  const { getDocumentProxy } = await import('unpdf')
+  const pdf = await getDocumentProxy(buf)
+  const items: RawItem[] = []
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p)
+    const viewport = page.getViewport({ scale: 1 })
+    const content = await page.getTextContent()
+    items.push(...pdfTextItemsToRaw(
+      content.items as Array<{ str: string; transform: number[]; width: number; height: number }>,
+      viewport.height,
+      p,
+    ))
+  }
+  return bandItemsToLines(items, pdf.numPages)
+}
 
 const DIR = join(process.cwd(), 'chord-samples')
 
@@ -106,6 +127,30 @@ async function main() {
     check(derived.length >= Math.max(1, exp.minSections), `derives ${derived.length} section rows`)
     check(derived.every((s, i) => s.order_index === i), 'derived sections sequentially indexed')
   }
+
+  // ---- Transpose unit checks (deterministic music theory) ----
+  console.log('\n=== transpose')
+  const { transposeChord, transposeBody, reorderBodyToChart } = await import('../src/lib/chords/format')
+  check(transposeChord('G', 2, 'A') === 'A', 'G +2 → A')
+  check(transposeChord('F#m7/E', 2, 'A') === 'G#m7/F#', 'F#m7/E +2 (sharp key) → G#m7/F#')
+  check(transposeChord('D', 1, 'Eb') === 'Eb', 'D +1 (flat key) → Eb')
+  check(transposeChord('Esus', 5, 'A') === 'Asus', 'Esus +5 → Asus')
+  check(transposeBody('[A]Thank [E/G#]You', 'A', 'Bb') === '[Bb]Thank [F/A]You', 'body A→Bb spells flats')
+  check(transposeBody('[G]x [??]y', 'G', 'A') === '[A]x [??]y', 'unknown tokens pass through untouched')
+  check(transposeBody('[G]x', 'G', 'G') === '[G]x', 'same key = unchanged')
+
+  // ---- Chart-flow reorder checks ----
+  console.log('\n=== reorder to chart flow')
+  const body = '# Verse\nV-line\n\n# Chorus\nC-line\n\n# Bridge\nB-line'
+  const r = reorderBodyToChart(body, ['INTRO', 'VERSE', 'CHORUS 2 (HE HAS DONE GREAT THINGS)', 'VERSE', 'OUTRO'])
+  check(r.matched === 3, `matched 3 chart sections (got ${r.matched})`)
+  check(r.unmatched.join(',') === 'INTRO,OUTRO', `unmatched: ${r.unmatched.join(',')}`)
+  const order = r.body.split('\n').filter(l => l.startsWith('# '))
+  check(order[0] === '# VERSE' && order[1] === '# CHORUS 2 (HE HAS DONE GREAT THINGS)' && order[2] === '# VERSE',
+    'sections follow the chart order with the chart\'s own labels')
+  check(r.body.includes('# Bridge'), 'unused sections appended so nothing is lost')
+  const r2 = reorderBodyToChart(body, ['SOMETHING', 'ELSE'])
+  check(r2.matched === 0 && r2.body === body, 'no matches → original body untouched')
 
   console.log(failures === 0 ? '\nAll chord checks passed.' : `\n${failures} chord check(s) FAILED.`)
   process.exit(failures === 0 ? 0 : 1)

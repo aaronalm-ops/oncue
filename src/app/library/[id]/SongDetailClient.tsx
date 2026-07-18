@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import ChordSheet from '@/components/ChordSheet'
+import ChordSheetViewer from '@/components/ChordSheetViewer'
 
 interface Version {
   id: string
@@ -19,9 +19,11 @@ interface Props {
   song: { id: string; title: string; artist: string | null }
   versions: Version[]
   canManage: boolean
+  userId: string
+  preferredKey: string | null
 }
 
-export default function SongDetailClient({ song, versions, canManage }: Props) {
+export default function SongDetailClient({ song, versions, canManage, userId, preferredKey }: Props) {
   const [openVersion, setOpenVersion] = useState<string | null>(
     versions.find(v => v.reviewed_at)?.id ?? versions[0]?.id ?? null
   )
@@ -40,14 +42,22 @@ export default function SongDetailClient({ song, versions, canManage }: Props) {
     <div className="min-h-screen bg-black text-white">
       <div className="max-w-lg mx-auto px-4 pt-10 pb-24">
 
-        <div className="flex items-center gap-3 mb-1">
+        <div className="flex items-center gap-2 mb-1">
           <Link href="/library"
-            className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center active:bg-zinc-800 transition-colors shrink-0">
+            className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center active:bg-zinc-800 transition-colors shrink-0"
+            aria-label="Back to library">
             <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </Link>
-          <div className="min-w-0">
+          <Link href="/"
+            className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center active:bg-zinc-800 transition-colors shrink-0"
+            aria-label="Home">
+            <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+          </Link>
+          <div className="min-w-0 ml-1">
             <h1 className="text-xl font-bold tracking-tight truncate">{song.title}</h1>
             {song.artist && <p className="text-xs text-zinc-500 truncate">{song.artist}</p>}
           </div>
@@ -94,7 +104,13 @@ export default function SongDetailClient({ song, versions, canManage }: Props) {
 
               {openVersion === v.id && (
                 <div className="border-t border-zinc-800 px-4 py-3">
-                  <ChordSheet body={v.content} />
+                  <ChordSheetViewer
+                    body={v.content}
+                    storedKey={v.stored_key}
+                    initialKey={preferredKey}
+                    librarySongId={song.id}
+                    userId={userId}
+                  />
                   {canManage && (
                     <div className="mt-4 flex gap-2">
                       <Link href={`/library/${song.id}/version/${v.id}`}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { extractPdfLines } from '@/lib/chords/extract'
+import type { PositionedLine } from '@/lib/chords/extract'
 import { parseChordSheet } from '@/lib/chords/parse'
 
 const EDITOR_ROLES = ['master', 'admin', 'worship_leader']
@@ -63,6 +63,9 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  // Extraction happens in the BROWSER (see extract-client.ts) — serverless
+  // font handling silently drops lyric lines. The client sends positioned
+  // lines; parsing stays server-side and pure.
   let status: 'parsed' | 'scan' | 'failed' = 'parsed'
   let draft: {
     title: string | null; artist: string | null; key: string | null
@@ -71,11 +74,19 @@ export async function POST(request: NextRequest) {
   } | null = null
 
   try {
-    const extracted = await extractPdfLines(new Uint8Array(buffer))
-    if (!extracted.hasTextLayer) {
+    const linesJson = formData.get('lines')
+    const hasTextLayer = formData.get('has_text_layer') === 'true'
+    if (typeof linesJson !== 'string' || !linesJson) {
+      status = 'failed'
+    } else if (!hasTextLayer) {
       status = 'scan'
     } else {
-      draft = parseChordSheet(extracted.lines, file.name)
+      const lines = JSON.parse(linesJson) as PositionedLine[]
+      if (!Array.isArray(lines) || lines.length === 0) {
+        status = 'scan'
+      } else {
+        draft = parseChordSheet(lines, file.name)
+      }
     }
   } catch {
     status = 'failed'

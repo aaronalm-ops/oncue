@@ -145,3 +145,134 @@ export function normalizeSectionLabel(label: string): string {
     .trim()
     .split(/\s+/)[0] ?? ''
 }
+
+/** Full normalised label including number: "Verse 2" → "verse 2" */
+export function normalizeSectionLabelFull(label: string): string {
+  return label
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[^a-z0-9]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// ============================================================
+// Transposition — deterministic music theory, no guessing.
+// Unknown tokens pass through untouched (the viewer flags them).
+// ============================================================
+
+const SHARP_SCALE = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+const FLAT_SCALE = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+const NOTE_INDEX: Record<string, number> = {
+  'C': 0, 'B#': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3, 'E': 4, 'Fb': 4,
+  'F': 5, 'E#': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8, 'Ab': 8, 'A': 9,
+  'A#': 10, 'Bb': 10, 'B': 11, 'Cb': 11,
+}
+// Keys whose signatures spell flats (majors + common minors)
+const FLAT_KEYS = new Set(['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm'])
+
+export const ALL_KEYS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B']
+
+export function keyIndex(key: string): number | null {
+  const m = key.trim().match(/^([A-G](?:#|b)?)(m)?$/)
+  if (!m) return null
+  return NOTE_INDEX[m[1]] ?? null
+}
+
+/** Transpose one chord symbol by `semitones`, spelling for `targetKey`. */
+export function transposeChord(chord: string, semitones: number, targetKey: string): string {
+  if (semitones % 12 === 0) return chord
+  const useFlats = FLAT_KEYS.has(targetKey.trim())
+  const scale = useFlats ? FLAT_SCALE : SHARP_SCALE
+
+  // Transpose every note-root occurrence: leading root and any post-slash roots.
+  return chord.replace(/(^|\/)([A-G](?:#|b)?)/g, (full, prefix: string, note: string) => {
+    const idx = NOTE_INDEX[note]
+    if (idx === undefined) return full
+    return prefix + scale[((idx + semitones) % 12 + 12) % 12]
+  })
+}
+
+/** Transpose all [chords] in a body text. Non-chord text is untouched. */
+export function transposeBody(body: string, fromKey: string, toKey: string): string {
+  const from = keyIndex(fromKey)
+  const to = keyIndex(toKey)
+  if (from === null || to === null) return body
+  const semitones = ((to - from) % 12 + 12) % 12
+  if (semitones === 0) return body
+  return body.replace(/\[([^\]\n]{1,24})\]/g, (_full, chord: string) => {
+    return `[${transposeChord(chord, semitones, toKey)}]`
+  })
+}
+
+// ============================================================
+// Chart-flow reorder: rearrange a chord body's sections to follow
+// the conductor's chart (Intro → Verse → Chorus → …).
+// ============================================================
+
+export interface ReorderResult {
+  body: string
+  matched: number
+  unmatched: string[] // chart labels with no chord section
+}
+
+/**
+ * Rebuild the body in the order of `chartLabels` (the service chart's section
+ * labels, in order). Matching: exact full label first ("verse 2"), then base
+ * word ("verse"). A chord section may be reused when the chart repeats it.
+ * Chart labels with no match are skipped (reported), and chord sections never
+ * matched are appended at the end under their own headers so nothing is lost.
+ */
+export function reorderBodyToChart(body: string, chartLabels: string[]): ReorderResult {
+  const sections = deriveSections(body)
+  if (sections.length === 0) return { body, matched: 0, unmatched: [] }
+
+  const byFull = new Map<string, DerivedSection[]>()
+  const byBase = new Map<string, DerivedSection[]>()
+  for (const s of sections) {
+    const full = normalizeSectionLabelFull(s.label)
+    const base = normalizeSectionLabel(s.label)
+    byFull.set(full, [...(byFull.get(full) ?? []), s])
+    byBase.set(base, [...(byBase.get(base) ?? []), s])
+  }
+
+  const out: string[] = []
+  const used = new Set<number>()
+  const unmatched: string[] = []
+  let matched = 0
+  // Per-label cursor so "VERSE, VERSE" walks Verse 1 → Verse 2, then wraps.
+  const cursors = new Map<string, number>()
+
+  for (const chartLabel of chartLabels) {
+    const full = normalizeSectionLabelFull(chartLabel)
+    const base = normalizeSectionLabel(chartLabel)
+    const pool = byFull.get(full)?.length ? byFull.get(full)! : (byBase.get(base) ?? [])
+    if (pool.length === 0) {
+      unmatched.push(chartLabel)
+      continue
+    }
+    const cursorKey = pool === byFull.get(full) ? `f:${full}` : `b:${base}`
+    const cursor = cursors.get(cursorKey) ?? 0
+    const section = pool[cursor % pool.length]
+    cursors.set(cursorKey, cursor + 1)
+    used.add(section.order_index)
+    matched++
+    // Keep the CHART's label (the conductor's wording) as the header
+    out.push(`# ${chartLabel}`)
+    if (section.content) out.push(section.content)
+    out.push('')
+  }
+
+  // Anything never used goes at the end, unchanged
+  const leftovers = sections.filter(s => !used.has(s.order_index))
+  if (leftovers.length > 0 && matched > 0) {
+    for (const s of leftovers) {
+      out.push(`# ${s.label}`)
+      if (s.content) out.push(s.content)
+      out.push('')
+    }
+  }
+
+  if (matched === 0) return { body, matched: 0, unmatched }
+  return { body: out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n+$/g, ''), matched, unmatched }
+}
