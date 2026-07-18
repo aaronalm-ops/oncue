@@ -11,6 +11,7 @@ export interface ParsedInstruction {
 }
 
 export interface ParsedSection {
+  order_index: number
   label: string
   comments: string
   instructions: ParsedInstruction[]
@@ -189,6 +190,7 @@ export async function parseChart(buffer: any, filename: string): Promise<ParseRe
       })
 
       currentSong.sections.push({
+        order_index: currentSong.sections.length,
         label,
         comments,
         instructions,
