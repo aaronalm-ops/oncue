@@ -22,7 +22,7 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
     .single()
   if (!service) notFound()
 
-  const { data: songs } = await supabase
+  const songsRes = await supabase
     .from('songs')
     .select(`
       id, order_index, title, scale, medley_group, reference_links, in_chart,
@@ -33,6 +33,21 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
     `)
     .eq('service_id', id)
     .order('order_index')
+
+  // v5 migration (in_chart) not applied yet? Degrade gracefully.
+  const songs = songsRes.error
+    ? (await supabase
+        .from('songs')
+        .select(`
+          id, order_index, title, scale, medley_group, reference_links,
+          sections (
+            id, order_index, label, comments,
+            instructions ( id, instrument, text, is_intro )
+          )
+        `)
+        .eq('service_id', id)
+        .order('order_index')).data?.map(s => ({ ...s, in_chart: true })) ?? null
+    : songsRes.data
 
   // The chart directs the flow — songs dropped by the chart stay out of My Part
   const sortedSongs = (songs ?? []).filter(s => s.in_chart !== false).map(song => ({

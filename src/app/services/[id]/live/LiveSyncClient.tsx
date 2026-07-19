@@ -529,6 +529,20 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
 
       {/* Fixed bottom controls */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderB} ${bg} px-4 pt-2.5 pb-4`}>
+        {impromptu ? (
+          <div className="flex items-center gap-3">
+            <p className={`text-xs flex-1 min-w-0 truncate ${dim}`}>
+              Everyone is seeing &ldquo;{impromptu.title}&rdquo;
+            </p>
+            <button
+              onClick={endImpromptu}
+              disabled={endingImpromptu}
+              className="shrink-0 rounded-xl px-4 py-3 font-semibold text-sm bg-amber-600 text-white disabled:opacity-50 active:scale-95 transition-transform"
+            >
+              {endingImpromptu ? 'Ending…' : 'End impromptu — back to chart'}
+            </button>
+          </div>
+        ) : (<>
         {/* Instrument selector */}
         <div className="flex items-center gap-1.5 mb-2.5 overflow-x-auto no-scrollbar">
           {instruments.map(instr => (
@@ -572,6 +586,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
             Next
           </button>
         </div>
+        </>)}
       </div>
     </div>
   )

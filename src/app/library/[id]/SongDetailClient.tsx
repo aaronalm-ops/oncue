@@ -21,9 +21,11 @@ interface Props {
   canManage: boolean
   userId: string
   preferredKey: string | null
+  todayServiceId: string | null
+  sharedLiveNow: boolean
 }
 
-export default function SongDetailClient({ song, versions, canManage, userId, preferredKey }: Props) {
+export default function SongDetailClient({ song, versions, canManage, userId, preferredKey, todayServiceId, sharedLiveNow }: Props) {
   const [openVersion, setOpenVersion] = useState<string | null>(
     versions.find(v => v.reviewed_at)?.id ?? versions[0]?.id ?? null
   )
@@ -34,6 +36,25 @@ export default function SongDetailClient({ song, versions, canManage, userId, pr
   const [savingMeta, setSavingMeta] = useState(false)
   const [metaError, setMetaError] = useState<string | null>(null)
   const router = useRouter()
+
+  const [shareBusy, setShareBusy] = useState(false)
+  const [isSharedLive, setIsSharedLive] = useState(sharedLiveNow)
+  const hasReviewed = versions.some(v => v.reviewed_at)
+
+  async function toggleShareLive() {
+    if (!todayServiceId) return
+    setShareBusy(true)
+    const { createClient: createBrowserClient } = await import('@/lib/supabase/client')
+    const supabase = createBrowserClient()
+    const { error } = await supabase.from('session_state').update({
+      impromptu_library_song_id: isSharedLive ? null : song.id,
+      impromptu_key: null,
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
+    }).eq('service_id', todayServiceId)
+    setShareBusy(false)
+    if (!error) setIsSharedLive(v => !v)
+  }
 
   async function saveMeta() {
     if (!metaTitle.trim()) { setMetaError('Title cannot be empty'); return }
@@ -117,6 +138,24 @@ export default function SongDetailClient({ song, versions, canManage, userId, pr
             </button>
           )}
         </div>
+
+        {/* Impromptu live share — push this song onto everyone's Live view now */}
+        {todayServiceId && hasReviewed && (
+          <button
+            onClick={toggleShareLive}
+            disabled={shareBusy}
+            className={`mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold disabled:opacity-50 active:scale-95 transition-transform ${
+              isSharedLive ? 'bg-amber-600 text-white' : 'bg-zinc-900 border border-amber-800/60 text-amber-400'
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${isSharedLive ? 'bg-white animate-pulse' : 'bg-amber-500'}`} />
+            {shareBusy
+              ? 'Working…'
+              : isSharedLive
+                ? 'Live now on everyone’s screen — tap to end'
+                : 'Share live to today’s service'}
+          </button>
+        )}
 
         <div className="mt-5 space-y-3">
           {versions.length === 0 && (

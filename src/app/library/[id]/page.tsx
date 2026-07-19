@@ -31,6 +31,24 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
     .eq('library_song_id', id)
     .maybeSingle()
 
+  // Impromptu live share target: today's service (church timezone)
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date())
+  const { data: todayService } = await supabase
+    .from('services')
+    .select('id')
+    .eq('service_date', today)
+    .maybeSingle()
+
+  let sharedLiveNow = false
+  if (todayService) {
+    const { data: st } = await supabase
+      .from('session_state')
+      .select('impromptu_library_song_id')
+      .eq('service_id', todayService.id)
+      .maybeSingle()
+    sharedLiveNow = (st as { impromptu_library_song_id?: string | null } | null)?.impromptu_library_song_id === id
+  }
+
   const versions = (song.song_versions ?? [])
     // members only ever receive reviewed versions (RLS enforces this too)
     .filter(v => canManage || v.reviewed_at !== null)
@@ -52,6 +70,8 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
       canManage={canManage}
       userId={user.id}
       preferredKey={pref?.preferred_key ?? null}
+      todayServiceId={todayService?.id ?? null}
+      sharedLiveNow={sharedLiveNow}
     />
   )
 }

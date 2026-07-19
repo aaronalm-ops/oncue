@@ -39,16 +39,29 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   // Which songs have chords available (via confirmed link, or title match)?
   // Gated to editors until the parser rollout opens chords to everyone.
   const chordsVisible = canSeeChords(role)
-  const { data: songs } = chordsVisible
-    ? await supabase
+  type SongRow = { id: string; order_index: number; title: string; scale: string | null; in_chart?: boolean }
+  let songs: SongRow[] = []
+  if (chordsVisible) {
+    const res = await supabase
+      .from('songs')
+      .select('id, order_index, title, scale, in_chart')
+      .eq('service_id', id)
+      .order('order_index')
+    if (res.error) {
+      // v5 migration (in_chart) not applied yet — degrade gracefully
+      const fallback = await supabase
         .from('songs')
-        .select('id, order_index, title, scale, in_chart')
+        .select('id, order_index, title, scale')
         .eq('service_id', id)
         .order('order_index')
-    : { data: [] as { id: string; order_index: number; title: string; scale: string | null; in_chart: boolean }[] }
+      songs = (fallback.data ?? []) as SongRow[]
+    } else {
+      songs = res.data ?? []
+    }
+  }
 
   const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
-  const songIds = (songs ?? []).map(s => s.id)
+  const songIds = songs.map(s => s.id)
   const [{ data: links }, { data: librarySongs }] = await Promise.all([
     songIds.length
       ? supabase.from('song_links').select('song_id, library_song_id').in('song_id', songIds)
@@ -66,7 +79,7 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
       .filter(ls => (ls.song_versions ?? []).some(v => v.reviewed_at !== null))
       .map(ls => ls.id),
   )
-  const songChords = (songs ?? []).map(s => {
+  const songChords = songs.map(s => {
     const linked = linkMap.get(s.id)
     const libId = linked && reviewedLibIds.has(linked) ? linked : reviewedLib.get(norm(s.title)) ?? null
     return { ...s, hasChords: libId !== null }
