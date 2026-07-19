@@ -13,7 +13,7 @@ export default async function ServicesPage() {
     .from('profiles').select('role, instrument').eq('id', user!.id).single()
   const role = (profile?.role ?? 'member') as AppRole
   const isPrivileged = role === 'master' || role === 'admin'
-  const canAccessLibrary = role !== 'member'
+  const canAccessLibrary = true // v6: chords are open to every member
 
   const { data: services } = await supabase
     .from('services')
@@ -59,7 +59,7 @@ export default async function ServicesPage() {
         <ServicesClient
           services={services ?? []}
           isPrivileged={isPrivileged}
-          todayStr={new Date().toISOString().slice(0, 10)}
+          todayStr={new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date())}
         />
       </div>
     </div>
