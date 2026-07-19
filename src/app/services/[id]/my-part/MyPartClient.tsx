@@ -185,6 +185,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   const [highContrast, setHighContrast] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isLive, setIsLive] = useState(false)
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'reconnecting' | 'offline'>('connecting')
   const [notes, setNotes] = useState<Record<string, string>>(
     Object.fromEntries(initialNotes.map(n => [`${n.section_id}:${n.instrument}`, n.note_text]))
   )
@@ -260,12 +261,18 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     const clamped = Math.max(0, Math.min(songs.length - 1, idx))
     setActiveSongIdx(clamped)
     if (isLiveRef.current) {
+      // Supabase builders are lazy thenables — without .then()/await the write
+      // is never sent, so "Go Live" silently broadcast nothing. Fire-and-forget.
       getClient().from('session_state').upsert({
         service_id: serviceId,
         current_song_index: clamped,
         current_section_index: 0,
+        updated_at: new Date().toISOString(),
         updated_by: userId,
-      }, { onConflict: 'service_id' })
+      }, { onConflict: 'service_id' }).then(
+        ({ error }) => { if (error) console.error('[my-part] go-live broadcast failed', error) },
+        (e) => console.error('[my-part] go-live broadcast failed', e),
+      )
     }
   }, [serviceId, songs.length, userId])
 
@@ -277,28 +284,67 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       return
     }
 
-    const channel = getClient()
-      .channel(`go-live:${serviceId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'session_state', filter: `service_id=eq.${serviceId}` },
-        (payload) => {
-          const state = payload.new as { current_song_index?: number; updated_by?: string }
-          // Don't apply our own broadcasts
-          if (state.updated_by === userId) return
-          if (typeof state.current_song_index === 'number') {
-            setActiveSongIdx(state.current_song_index)
-          }
-        }
-      )
-      .subscribe()
+    let retryTimeout: ReturnType<typeof setTimeout> | undefined
+    let cancelled = false
+    setLiveStatus('connecting')
 
-    channelRef.current = channel
+    // session_state can point past the current chart after a shrink — clamp on
+    // receipt so songs[activeSongIdx] can never be undefined.
+    const applyIndex = (idx: number | undefined) => {
+      if (typeof idx !== 'number') return
+      setActiveSongIdx(Math.max(0, Math.min(songs.length - 1, idx)))
+    }
+
+    // One retry timer only, and — unlike the old code, which had no status
+    // callback at all — CLOSED/error now drive the LIVE badge and reconnect.
+    function scheduleReconnect() {
+      if (cancelled || retryTimeout) return
+      retryTimeout = setTimeout(() => {
+        retryTimeout = undefined
+        if (cancelled) return
+        if (channelRef.current) getClient().removeChannel(channelRef.current)
+        subscribe()
+      }, 3000)
+    }
+
+    function subscribe() {
+      if (cancelled) return
+      let active = true
+      const channel = getClient()
+        .channel(`go-live:${serviceId}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'session_state', filter: `service_id=eq.${serviceId}` },
+          (payload) => {
+            const state = payload.new as { current_song_index?: number; updated_by?: string }
+            // Don't apply our own broadcasts
+            if (state.updated_by === userId) return
+            applyIndex(state.current_song_index)
+          }
+        )
+        .subscribe((status) => {
+          if (cancelled || !active) return
+          if (status === 'SUBSCRIBED') {
+            if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = undefined }
+            setLiveStatus('live')
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            setLiveStatus(status === 'CLOSED' ? 'offline' : 'reconnecting')
+            active = false
+            scheduleReconnect()
+          }
+        })
+      channelRef.current = channel
+    }
+
+    subscribe()
+
     return () => {
-      channel.unsubscribe()
+      cancelled = true
+      if (retryTimeout) clearTimeout(retryTimeout)
+      channelRef.current?.unsubscribe()
       channelRef.current = null
     }
-  }, [isLive, serviceId, userId])
+  }, [isLive, serviceId, userId, songs.length])
 
   // Pedal / keyboard navigation (always registered, only acts when live)
   useEffect(() => {
@@ -332,7 +378,11 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
 
   function handleInstrumentChange(instr: string) {
     setViewInstrument(instr)
-    getClient().from('profiles').update({ instrument: instr }).eq('id', userId)
+    // Lazy builder — must call .then() or the instrument preference never saves.
+    getClient().from('profiles').update({ instrument: instr }).eq('id', userId).then(
+      ({ error }) => { if (error) console.error('[my-part] instrument save failed', error) },
+      (e) => console.error('[my-part] instrument save failed', e),
+    )
   }
 
   async function saveNote(sectionId: string, text: string) {
@@ -370,7 +420,9 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     )
   }
 
-  const activeSong = songs[activeSongIdx]
+  // Realtime clamps on receipt; this guard makes an out-of-range index
+  // impossible to crash on (songs is guaranteed non-empty above).
+  const activeSong = songs[Math.min(activeSongIdx, songs.length - 1)] ?? songs[0]
 
   const sharedProps = {
     viewInstrument,
@@ -421,11 +473,17 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
               </button>
             )
           })}
-          {/* Live indicator in strip */}
+          {/* Live indicator in strip — reflects real subscription health */}
           {isLive && (
-            <span className="ml-auto shrink-0 flex items-center gap-1 text-[10px] font-bold text-green-400">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-              LIVE
+            <span className={`ml-auto shrink-0 flex items-center gap-1 text-[10px] font-bold ${
+              liveStatus === 'live' ? 'text-green-400'
+                : liveStatus === 'offline' ? 'text-red-400' : 'text-amber-400'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                liveStatus === 'live' ? 'bg-green-400 animate-pulse'
+                  : liveStatus === 'offline' ? 'bg-red-500' : 'bg-amber-400 animate-pulse'
+              }`} />
+              {liveStatus === 'live' ? 'LIVE' : liveStatus === 'offline' ? 'OFFLINE' : 'SYNC'}
             </span>
           )}
         </div>

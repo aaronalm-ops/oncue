@@ -152,7 +152,11 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
 
   function handleInstrumentChange(instr: string) {
     setViewInstrument(instr)
-    getClient().from('profiles').update({ instrument: instr }).eq('id', userId)
+    // Lazy builder — must call .then() or the instrument preference never saves.
+    getClient().from('profiles').update({ instrument: instr }).eq('id', userId).then(
+      ({ error }) => { if (error) console.error('[live] instrument save failed', error) },
+      (e) => console.error('[live] instrument save failed', e),
+    )
   }
 
   type FlatItem = { songIdx: number; sectionIdx: number }
@@ -160,11 +164,17 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   songs.forEach((song, si) => {
     song.sections.forEach((_, seci) => flatList.push({ songIdx: si, sectionIdx: seci }))
   })
-  const currentFlatIdx = flatList.findIndex(f => f.songIdx === songIdx && f.sectionIdx === sectionIdx)
-  const nextFlat = currentFlatIdx < flatList.length - 1 ? flatList[currentFlatIdx + 1] : null
 
-  const currentSong = songs[Math.min(songIdx, songs.length - 1)]
-  const currentSection = currentSong?.sections[Math.min(sectionIdx, (currentSong?.sections.length ?? 1) - 1)]
+  // session_state can point past the current chart after a shrink (chart
+  // re-uploaded with fewer songs). Clamp before ANY indexing / flat-list math,
+  // otherwise findIndex returns -1 and "next" jumps to song 0.
+  const safeSongIdx = Math.min(Math.max(0, songIdx), songs.length - 1)
+  const currentSong = songs[safeSongIdx]
+  const safeSectionIdx = Math.min(Math.max(0, sectionIdx), (currentSong?.sections.length ?? 1) - 1)
+  const currentSection = currentSong?.sections[safeSectionIdx]
+
+  const currentFlatIdx = flatList.findIndex(f => f.songIdx === safeSongIdx && f.sectionIdx === safeSectionIdx)
+  const nextFlat = currentFlatIdx >= 0 && currentFlatIdx < flatList.length - 1 ? flatList[currentFlatIdx + 1] : null
 
   async function pushState(newSongIdx: number, newSectionIdx: number) {
     setIsSaving(true)
@@ -203,7 +213,18 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   }
 
   useEffect(() => {
-    let retryTimeout: ReturnType<typeof setTimeout>
+    let retryTimeout: ReturnType<typeof setTimeout> | undefined
+    let cancelled = false
+    let currentChannel: ReturnType<ReturnType<typeof createClient>['channel']> | null = null
+
+    // session_state can point past the current chart after a shrink — clamp on
+    // receipt so state never holds an out-of-range index.
+    const clampAndSet = (rawSong: number, rawSec: number) => {
+      const si = Math.min(Math.max(0, rawSong), songs.length - 1)
+      const seci = Math.min(Math.max(0, rawSec), (songs[si]?.sections.length ?? 1) - 1)
+      setSongIdx(si)
+      setSectionIdx(seci)
+    }
 
     // Catch-up: any missed moves (dropped connection, subscribe gap after SSR)
     // are recovered by refetching the authoritative row.
@@ -214,8 +235,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
         .eq('service_id', serviceId)
         .single()
       if (data) {
-        setSongIdx(data.current_song_index)
-        setSectionIdx(data.current_section_index)
+        clampAndSet(data.current_song_index, data.current_section_index)
         applyImpromptu(
           (data as { impromptu_library_song_id?: string | null }).impromptu_library_song_id ?? null,
           (data as { impromptu_key?: string | null }).impromptu_key ?? null,
@@ -223,7 +243,23 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
       }
     }
 
+    // One retry timer only. CHANNEL_ERROR and TIMED_OUT can both fire, and
+    // removeChannel emits CLOSED — without this guard each would stack a new
+    // channel. Also retries on CLOSED, which the old code never did.
+    function scheduleReconnect() {
+      if (cancelled || retryTimeout) return
+      setSyncStatus('reconnecting')
+      retryTimeout = setTimeout(() => {
+        retryTimeout = undefined
+        if (cancelled) return
+        if (currentChannel) getClient().removeChannel(currentChannel)
+        subscribe()
+      }, 3000)
+    }
+
     function subscribe() {
+      if (cancelled) return
+      let active = true // ignore late callbacks from a channel we've superseded
       const channel = getClient()
         .channel(`session:${serviceId}`)
         .on('postgres_changes', {
@@ -245,30 +281,27 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           }
           if (state.updated_by === userId) return // own move, already applied locally
           if (typeof state.current_song_index === 'number' && typeof state.current_section_index === 'number') {
-            setSongIdx(state.current_song_index)
-            setSectionIdx(state.current_section_index)
+            clampAndSet(state.current_song_index, state.current_section_index)
             setNotesOpen(false)
             setSyncStatus('live')
           }
         })
         .subscribe(status => {
+          if (cancelled || !active) return
           if (status === 'SUBSCRIBED') {
+            if (retryTimeout) { clearTimeout(retryTimeout); retryTimeout = undefined }
             setSyncStatus('live')
             refetchState()
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            setSyncStatus(status === 'CLOSED' ? 'offline' : 'reconnecting')
+            active = false // this channel is done; a later CLOSED from it is ignored
+            scheduleReconnect()
           }
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            setSyncStatus('reconnecting')
-            retryTimeout = setTimeout(() => {
-              getClient().removeChannel(channel)
-              subscribe()
-            }, 3000)
-          }
-          if (status === 'CLOSED') setSyncStatus('offline')
         })
-      return channel
+      currentChannel = channel
     }
 
-    const channel = subscribe()
+    subscribe()
 
     // Browser regained network: realtime will reconnect, but refetch immediately
     // so the device catches up without waiting for the next move.
@@ -276,9 +309,10 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     window.addEventListener('online', onOnline)
 
     return () => {
-      clearTimeout(retryTimeout)
+      cancelled = true
+      if (retryTimeout) clearTimeout(retryTimeout)
       window.removeEventListener('online', onOnline)
-      getClient().removeChannel(channel)
+      if (currentChannel) getClient().removeChannel(currentChannel)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serviceId, userId])
@@ -296,7 +330,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   const myInstruction = currentSection?.instructions.find(i => i.instrument === viewInstrument)
   const isMyIntro = myInstruction?.is_intro ?? false
   const nextSectionLabel = nextFlat ? songs[nextFlat.songIdx].sections[nextFlat.sectionIdx]?.label : null
-  const nextSongTitle = nextFlat && nextFlat.songIdx !== songIdx ? songs[nextFlat.songIdx]?.title : null
+  const nextSongTitle = nextFlat && nextFlat.songIdx !== safeSongIdx ? songs[nextFlat.songIdx]?.title : null
 
   const hc = highContrast
   const bg = hc ? 'bg-white' : 'bg-black'
@@ -320,8 +354,8 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           </Link>
 
           {songs.map((song, si) => {
-            const isPast = si < songIdx
-            const isActive = si === songIdx
+            const isPast = si < safeSongIdx
+            const isActive = si === safeSongIdx
             const shortTitle = song.title.length > 12 ? song.title.slice(0, 12) + '…' : song.title
             return (
               <button key={song.id} onClick={() => jumpToSong(si)}

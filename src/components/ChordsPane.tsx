@@ -86,11 +86,19 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
     return (content: string) => (active ? transposeBody(content, storedKey!, targetKey) : content)
   }, [canTranspose, targetKey, storedKey])
 
-  // Follow the live position
+  // Follow the live position — scroll ONLY the vertical pane. scrollIntoView
+  // pans every scrollable ancestor, including the horizontal snap container,
+  // which hijacks the chart⟷chords swipe. Compute scrollTop manually instead.
   useEffect(() => {
-    if (currentSectionIdx !== null && currentRef.current) {
-      currentRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    }
+    if (currentSectionIdx === null) return
+    const el = currentRef.current
+    if (!el) return
+    const scroller = el.closest('.overflow-y-auto') as HTMLElement | null
+    if (!scroller) return
+    const elRect = el.getBoundingClientRect()
+    const scRect = scroller.getBoundingClientRect()
+    const delta = (elRect.top - scRect.top) - (scroller.clientHeight - el.clientHeight) / 2
+    scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: 'smooth' })
   }, [currentSectionIdx])
 
   if (!chords) {
