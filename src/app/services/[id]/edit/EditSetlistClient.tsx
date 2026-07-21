@@ -3,7 +3,10 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import SongPicker, { type PickedSong } from '@/components/SongPicker'
+
+interface Leader { id: string; name: string; isLeader: boolean }
 
 interface Song {
   id?: string
@@ -17,6 +20,8 @@ interface Song {
 interface Props {
   serviceId: string
   serviceDate: string
+  leaders: Leader[]
+  initialLeaderId: string | null
   initialSongs: Song[]
 }
 
@@ -27,10 +32,11 @@ function move<T>(arr: T[], from: number, to: number): T[] {
   return next.map((s, i) => ({ ...s, order_index: i }))
 }
 
-export default function EditSetlistClient({ serviceId, serviceDate, initialSongs }: Props) {
+export default function EditSetlistClient({ serviceId, serviceDate, leaders, initialLeaderId, initialSongs }: Props) {
   const [songs, setSongs] = useState<Song[]>(
     initialSongs.map((s, i) => ({ ...s, order_index: i }))
   )
+  const [leaderId, setLeaderId] = useState(initialLeaderId ?? '')
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -72,6 +78,17 @@ export default function EditSetlistClient({ serviceId, serviceDate, initialSongs
 
     setSaving(true)
     setError(null)
+
+    // Worship leader goes through an RPC (worship_leaders can't UPDATE services
+    // via RLS). Only call it when it actually changed.
+    if (leaderId !== (initialLeaderId ?? '')) {
+      const { error: wlErr } = await createClient().rpc('set_worship_leader', {
+        p_service_id: serviceId,
+        p_worship_leader: leaderId || null,
+      })
+      if (wlErr) { setSaving(false); setError(wlErr.message); return }
+    }
+
     const res = await fetch(`/api/services/${serviceId}/songs`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -110,6 +127,21 @@ export default function EditSetlistClient({ serviceId, serviceDate, initialSongs
             <h1 className="text-xl font-bold tracking-tight">Edit Setlist</h1>
             <p className="text-xs text-zinc-500">{dateLabel}</p>
           </div>
+        </div>
+
+        {/* Worship leader — assign or change any time (e.g. once they register) */}
+        <div className="mt-6">
+          <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Worship leader</label>
+          <select
+            value={leaderId}
+            onChange={e => { setLeaderId(e.target.value); setDirty(true) }}
+            className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-purple-600"
+          >
+            <option value="">Unassigned — set later</option>
+            {leaders.map(l => (
+              <option key={l.id} value={l.id}>{l.name}{l.isLeader ? ' ★' : ''}</option>
+            ))}
+          </select>
         </div>
 
         {error && (

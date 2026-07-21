@@ -62,7 +62,6 @@ export default function NewSetlistClient({ leaders, currentUserId }: Props) {
     setError(null)
     if (!date) { setError('Pick a service date'); return }
     if (!dayOfWeek) { setError('Services are on Thursdays and Saturdays — pick one of those dates'); return }
-    if (!leaderId) { setError('Pick the worship leader'); return }
     if (songs.length === 0) { setError('Add at least one song'); return }
 
     setSaving(true)
@@ -70,7 +69,7 @@ export default function NewSetlistClient({ leaders, currentUserId }: Props) {
     const { data, error: rpcErr } = await supabase.rpc('create_setlist', {
       p_service_date: date,
       p_day_of_week: dayOfWeek,
-      p_worship_leader: leaderId,
+      p_worship_leader: leaderId || null,
       p_songs: songs.map(s => ({
         title: s.title,
         scale: s.scale.trim() || null,
@@ -116,7 +115,7 @@ export default function NewSetlistClient({ leaders, currentUserId }: Props) {
               <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Worship leader</label>
               <select value={leaderId} onChange={e => setLeaderId(e.target.value)}
                 className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-purple-600">
-                <option value="">Choose…</option>
+                <option value="">Unassigned — set later</option>
                 {leaders.map(l => (
                   <option key={l.id} value={l.id}>{l.name}{l.isLeader ? ' ★' : ''}</option>
                 ))}
