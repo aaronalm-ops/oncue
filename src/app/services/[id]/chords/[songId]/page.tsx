@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
 import { reorderBodyToChart } from '@/lib/chords/format'
 import { canSeeChords } from '@/lib/chords/access'
+import { normTitle } from '@/lib/chords/service-chords'
 
 /**
  * A song's chords in the context of a service:
@@ -17,7 +18,7 @@ export default async function ServiceSongChordsPage({ params }: { params: Promis
   if (!user) redirect('/auth/login')
 
   // Gated to editors until the parser rollout opens chords to everyone
-  const { data: viewerProfile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+  const { data: viewerProfile } = await supabase.from('profiles').select('role, instrument, preferred_key').eq('id', user.id).single()
   if (!canSeeChords(viewerProfile?.role)) redirect(`/services/${id}`)
 
   const { data: song } = await supabase
@@ -29,7 +30,7 @@ export default async function ServiceSongChordsPage({ params }: { params: Promis
   if (!song) notFound()
 
   // Resolve the library song: confirmed link first, then normalised title match
-  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+  const norm = normTitle
   const { data: link } = await supabase
     .from('song_links')
     .select('library_song_id')
@@ -124,9 +125,12 @@ export default async function ServiceSongChordsPage({ params }: { params: Promis
         <ChordSheetViewer
           body={reordered.body}
           storedKey={version.stored_key}
-          initialKey={pref?.preferred_key ?? song.scale}
+          initialKey={pref?.preferred_key ?? null}
           librarySongId={librarySongId}
           userId={user.id}
+          instrument={(viewerProfile as { instrument?: string | null } | null)?.instrument ?? null}
+          preferredKey={(viewerProfile as { preferred_key?: string | null } | null)?.preferred_key ?? null}
+          actualKey={song.scale}
         />
       </div>
     </div>

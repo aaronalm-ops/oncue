@@ -2,23 +2,42 @@ import { createClient } from '@/lib/supabase/server'
 import UploadButton from '@/components/UploadButton'
 import UserMenu from '@/components/UserMenu'
 import ServicesClient from './ServicesClient'
+import ProfileCompletionModal from '@/components/ProfileCompletionModal'
 import Link from 'next/link'
-import type { AppRole } from '@/lib/types'
+import type { AppRole, AppTeam } from '@/lib/types'
 
 export default async function ServicesPage() {
   const supabase = await createClient()
 
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase
-    .from('profiles').select('role, instrument').eq('id', user!.id).single()
+    .from('profiles').select('role, instrument, display_name, teams, profile_completed_at').eq('id', user!.id).single()
   const role = (profile?.role ?? 'member') as AppRole
   const isPrivileged = role === 'master' || role === 'admin'
   const canAccessLibrary = true // v6: chords are open to every member
 
+  // One-time prompt for members who signed up before preferred-scale + teams.
+  const p = profile as { instrument?: string | null; display_name?: string | null; teams?: string[]; profile_completed_at?: string | null } | null
+  const needsProfilePrompt = !!p && !!p.instrument && !p.profile_completed_at
+
   const { data: services } = await supabase
     .from('services')
-    .select('id, service_date, day_of_week, source_filename')
+    .select('id, service_date, day_of_week, source_filename, worship_leader_id')
     .order('service_date', { ascending: false })
+
+  // Worship leader names for the list avatars (safe public directory view)
+  const leaderIds = [...new Set(
+    (services ?? []).map(s => (s as { worship_leader_id?: string | null }).worship_leader_id).filter(Boolean),
+  )] as string[]
+  const { data: leaderProfiles } = leaderIds.length
+    ? await supabase.from('public_profiles').select('id, display_name').in('id', leaderIds)
+    : { data: [] as { id: string; display_name: string | null }[] }
+  const leaderName = new Map((leaderProfiles ?? []).map(p => [p.id, p.display_name]))
+  const leaders: Record<string, { name: string | null }> = {}
+  for (const s of services ?? []) {
+    const lid = (s as { worship_leader_id?: string | null }).worship_leader_id
+    if (lid) leaders[s.id] = { name: leaderName.get(lid) ?? null }
+  }
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -52,7 +71,7 @@ export default async function ServicesPage() {
               </Link>
             )}
             {isPrivileged && <UploadButton />}
-            <UserMenu instrument={profile?.instrument ?? null} role={role} />
+            <UserMenu instrument={profile?.instrument ?? null} role={role} displayName={p?.display_name ?? null} />
           </div>
         </div>
 
@@ -60,8 +79,18 @@ export default async function ServicesPage() {
           services={services ?? []}
           isPrivileged={isPrivileged}
           todayStr={new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date())}
+          leaders={leaders}
         />
       </div>
+
+      {needsProfilePrompt && user && (
+        <ProfileCompletionModal
+          userId={user.id}
+          instrument={p!.instrument ?? null}
+          initialName={p!.display_name ?? null}
+          initialTeams={(p!.teams ?? []) as AppTeam[]}
+        />
+      )}
     </div>
   )
 }

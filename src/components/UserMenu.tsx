@@ -4,14 +4,16 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import Avatar from '@/components/Avatar'
 import type { AppRole } from '@/lib/types'
 
 interface Props {
   instrument: string | null
   role: AppRole
+  displayName?: string | null
 }
 
-export default function UserMenu({ instrument, role }: Props) {
+export default function UserMenu({ instrument, role, displayName = null }: Props) {
   const [open, setOpen] = useState(false)
   const router = useRouter()
 
@@ -28,24 +30,27 @@ export default function UserMenu({ instrument, role }: Props) {
     <div className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center active:bg-zinc-700 transition-colors"
+        className="rounded-full active:scale-95 transition-transform"
         aria-label="Account menu"
       >
-        <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-        </svg>
+        <Avatar name={displayName} size={32} />
       </button>
 
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-10 z-20 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl w-52 overflow-hidden">
-            {instrument && (
-              <div className="px-4 py-2.5 border-b border-zinc-800">
-                <p className="text-[10px] text-zinc-600 uppercase tracking-widest">My instrument</p>
-                <p className="text-sm font-semibold text-white mt-0.5">
-                  {instrument.charAt(0) + instrument.slice(1).toLowerCase()}
-                </p>
+            {(displayName || instrument) && (
+              <div className="px-4 py-2.5 border-b border-zinc-800 flex items-center gap-3">
+                <Avatar name={displayName} size={34} />
+                <div className="min-w-0">
+                  {displayName && <p className="text-sm font-semibold text-white truncate">{displayName}</p>}
+                  {instrument && (
+                    <p className="text-[11px] text-zinc-500">
+                      {instrument.charAt(0) + instrument.slice(1).toLowerCase()}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
             <Link

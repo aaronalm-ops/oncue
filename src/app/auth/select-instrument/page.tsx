@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { ALL_KEYS, instrumentTransposeMode } from '@/lib/chords/format'
+import { TEAMS, TEAM_LABELS, type AppTeam } from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,6 +17,8 @@ export default function SelectInstrumentPage() {
   const [name, setName] = useState('')
   const [selected, setSelected] = useState('')
   const [currentInstrument, setCurrentInstrument] = useState<string | null>(null)
+  const [preferredKey, setPreferredKey] = useState('') // '' = none / actual
+  const [teams, setTeams] = useState<AppTeam[]>(['worship'])
   const [saving, setSaving] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const router = useRouter()
@@ -23,15 +27,28 @@ export default function SelectInstrumentPage() {
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
-      supabase.from('profiles').select('instrument, display_name').eq('id', user.id).single()
+      supabase.from('profiles').select('instrument, display_name, preferred_key, teams').eq('id', user.id).single()
         .then(({ data }) => {
           if (data?.instrument) setCurrentInstrument(data.instrument)
           if (data?.display_name) setName(data.display_name)
+          const d = data as { preferred_key?: string | null; teams?: string[] } | null
+          if (d?.preferred_key) setPreferredKey(d.preferred_key)
+          if (d?.teams && d.teams.length) setTeams(d.teams as AppTeam[])
         })
     })
   }, [])
 
   const isFirstTime = !currentInstrument
+  const activeInstrument = selected || currentInstrument || ''
+  const mode = instrumentTransposeMode(activeInstrument)
+  const keyHint =
+    mode === 'keyboard' ? 'The key you like to play — we’ll show the keyboard transpose number for each song.'
+      : mode === 'capo' ? 'The shape key you like — we’ll show the capo position for each song.'
+        : 'Leave as “Actual” unless you read chords in a fixed key.'
+
+  function toggleTeam(t: AppTeam) {
+    setTeams(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
+  }
 
   async function handleSave() {
     if (!selected && isFirstTime) return
@@ -39,11 +56,15 @@ export default function SelectInstrumentPage() {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
-      await supabase.from('profiles').upsert({
+      const { error } = await supabase.from('profiles').upsert({
         id: user.id,
         display_name: name.trim() || null,
         instrument: selected || currentInstrument,
+        preferred_key: preferredKey || null,
+        teams,
+        profile_completed_at: new Date().toISOString(),
       })
+      if (error) { setSaving(false); return }
     }
     router.push('/services')
   }
@@ -58,22 +79,16 @@ export default function SelectInstrumentPage() {
 
   return (
     <div className="min-h-screen bg-black flex items-center justify-center p-6">
-      <div className="w-full max-w-sm space-y-6">
+      <div className="w-full max-w-sm space-y-6 py-10">
 
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">
               {isFirstTime ? 'Set up your profile' : 'My Profile'}
             </h1>
-            {isFirstTime ? (
-              <p className="mt-1 text-zinc-500 text-sm">Tell us your name and instrument.</p>
-            ) : (
-              <p className="mt-1 text-zinc-500 text-sm">
-                Instrument: <span className="text-purple-400 font-medium">
-                  {(selected || currentInstrument || '').charAt(0) + (selected || currentInstrument || '').slice(1).toLowerCase()}
-                </span>
-              </p>
-            )}
+            <p className="mt-1 text-zinc-500 text-sm">
+              {isFirstTime ? 'Your name, instrument, key and teams.' : 'Update your details any time.'}
+            </p>
           </div>
           {!isFirstTime && (
             <button onClick={() => router.push('/services')} className="text-zinc-500 text-sm active:text-zinc-300">
@@ -102,7 +117,7 @@ export default function SelectInstrumentPage() {
               key={instr}
               onClick={() => setSelected(instr)}
               className={`w-full rounded-xl px-4 py-3 text-left font-medium transition-colors ${
-                (selected || currentInstrument) === instr
+                activeInstrument === instr
                   ? 'bg-purple-600 text-white'
                   : 'bg-zinc-900 text-white border border-zinc-800 active:bg-zinc-800'
               }`}
@@ -110,6 +125,52 @@ export default function SelectInstrumentPage() {
               {instr.charAt(0) + instr.slice(1).toLowerCase()}
             </button>
           ))}
+        </div>
+
+        {/* Preferred key */}
+        <div className="space-y-2">
+          <label className="text-xs text-zinc-500 uppercase tracking-widest">Preferred key</label>
+          <p className="text-[11px] text-zinc-600 leading-snug">{keyHint}</p>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => setPreferredKey('')}
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
+                preferredKey === '' ? 'bg-white text-black' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
+              }`}
+            >
+              Actual
+            </button>
+            {ALL_KEYS.map(k => (
+              <button
+                key={k}
+                onClick={() => setPreferredKey(k)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
+                  preferredKey === k ? 'bg-purple-600 text-white' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
+                }`}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Teams */}
+        <div className="space-y-2">
+          <label className="text-xs text-zinc-500 uppercase tracking-widest">Teams</label>
+          <p className="text-[11px] text-zinc-600 leading-snug">Pick every team you’re part of.</p>
+          <div className="flex flex-wrap gap-2">
+            {TEAMS.map(t => (
+              <button
+                key={t}
+                onClick={() => toggleTeam(t)}
+                className={`rounded-xl px-4 py-2 text-sm font-medium transition-colors ${
+                  teams.includes(t) ? 'bg-purple-600 text-white' : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
+                }`}
+              >
+                {TEAM_LABELS[t]}
+              </button>
+            ))}
+          </div>
         </div>
 
         <button

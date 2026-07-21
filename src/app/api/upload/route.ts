@@ -16,6 +16,12 @@ export async function POST(request: NextRequest) {
   const file = formData.get('file') as File | null
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 })
 
+  // Route Handlers aren't covered by the Server Actions body limit — cap here.
+  const MAX_BYTES = 10 * 1024 * 1024
+  if (file.size > MAX_BYTES) {
+    return NextResponse.json({ error: 'File too large (max 10 MB).' }, { status: 413 })
+  }
+
   const filename = file.name
   if (!parseFilename(filename)) {
     return NextResponse.json(
@@ -59,6 +65,11 @@ export async function POST(request: NextRequest) {
     songs: number
     notes_restored: number
   }
+
+  // Snapshot this leader's arrangement (flow + conductor notes + links) so it
+  // pre-fills their next setlist. Best-effort — never fail the upload over it.
+  const { error: memErr } = await supabase.rpc('capture_service_memory', { p_service_id: service_id })
+  if (memErr) console.error('[upload] setlist memory capture failed', memErr)
 
   // Store the original file so "Download Excel" always works.
   // Surface a failure instead of swallowing it.

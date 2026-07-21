@@ -1,14 +1,17 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import SongPicker, { type PickedSong } from '@/components/SongPicker'
 
 interface Song {
   id?: string
   title: string
   scale: string | null
   order_index: number
+  library_song_id?: string | null // set for a newly added library song
+  hasChords?: boolean
 }
 
 interface Props {
@@ -55,8 +58,11 @@ export default function EditSetlistClient({ serviceId, serviceDate, initialSongs
     setDirty(true)
   }
 
-  function addSong() {
-    setSongs(prev => [...prev, { title: '', scale: null, order_index: prev.length }])
+  function addPicked(s: PickedSong) {
+    setSongs(prev => [...prev, {
+      title: s.title, scale: null, order_index: prev.length,
+      library_song_id: s.library_song_id, hasChords: s.hasChords,
+    }])
     setDirty(true)
   }
 
@@ -132,6 +138,9 @@ export default function EditSetlistClient({ serviceId, serviceDate, initialSongs
                   placeholder="Key"
                   className="w-14 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-center text-white placeholder:text-zinc-600 focus:outline-none focus:border-purple-600 transition-colors"
                 />
+                {song.hasChords === false && (
+                  <span className="shrink-0 text-[10px] font-semibold text-amber-500" title="No chord sheet yet">needs chords</span>
+                )}
               </div>
               <div className="flex items-center justify-end gap-1">
                 <button
@@ -166,16 +175,10 @@ export default function EditSetlistClient({ serviceId, serviceDate, initialSongs
           ))}
         </div>
 
-        {/* Add song */}
-        <button
-          onClick={addSong}
-          className="mt-3 w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-dashed border-zinc-800 text-sm text-zinc-500 active:bg-zinc-900 active:text-white transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Add song
-        </button>
+        {/* Add song — search title or lyrics; repeating songs pre-fill on save */}
+        <div className="mt-3">
+          <SongPicker onPick={addPicked} />
+        </div>
       </div>
 
       {/* Fixed save bar */}

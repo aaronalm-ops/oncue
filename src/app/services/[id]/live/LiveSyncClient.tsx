@@ -31,9 +31,10 @@ interface Props {
   prefsByLibraryId: Record<string, string>
   canMapSections: boolean
   initialImpromptu: ImpromptuShare | null
+  preferredKey: string | null // global transpose preference; null = actual
 }
 
-export default function LiveSyncClient({ serviceId, userId, songs, instruments, userInstrument, initialSongIndex, initialSectionIndex, chordsBySongId, prefsByLibraryId, canMapSections, initialImpromptu }: Props) {
+export default function LiveSyncClient({ serviceId, userId, songs, instruments, userInstrument, initialSongIndex, initialSectionIndex, chordsBySongId, prefsByLibraryId, canMapSections, initialImpromptu, preferredKey }: Props) {
   const [songIdx, setSongIdx] = useState(initialSongIndex)
   const [sectionIdx, setSectionIdx] = useState(initialSectionIndex)
   const [highContrast, setHighContrast] = useState(false)
@@ -76,13 +77,16 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
 
   async function endImpromptu() {
     setEndingImpromptu(true)
-    await getClient().from('session_state').update({
-      impromptu_library_song_id: null,
-      impromptu_key: null,
-      updated_at: new Date().toISOString(),
-      updated_by: userId,
-    }).eq('service_id', serviceId)
-    setEndingImpromptu(false)
+    try {
+      const { error } = await getClient().rpc('set_impromptu', {
+        p_service_id: serviceId,
+        p_library_song_id: null,
+        p_key: null,
+      })
+      if (error) console.error('[live] end impromptu failed', error)
+    } finally {
+      setEndingImpromptu(false)
+    }
     impromptuRef.current = null
     setImpromptu(null)
   }
@@ -428,6 +432,8 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
               librarySongId={impromptu.librarySongId}
               userId={userId}
               highContrast={hc}
+              instrument={viewInstrument}
+              preferredKey={preferredKey}
             />
           </div>
         </div>
@@ -535,6 +541,8 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
               currentSectionIdx={Math.min(sectionIdx, (currentSong.sections.length || 1) - 1)}
               highContrast={hc}
               canMapSections={canMapSections}
+              instrument={viewInstrument}
+              preferredKey={preferredKey}
             />
           </div>
         </div>

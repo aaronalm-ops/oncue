@@ -20,12 +20,14 @@ interface Props {
   versions: Version[]
   canManage: boolean
   userId: string
-  preferredKey: string | null
+  perSongKey: string | null // saved per-song preference (overrides global)
+  globalPreferredKey: string | null // profile default; null = actual
+  instrument: string | null
   todayServiceId: string | null
   sharedLiveNow: boolean
 }
 
-export default function SongDetailClient({ song, versions, canManage, userId, preferredKey, todayServiceId, sharedLiveNow }: Props) {
+export default function SongDetailClient({ song, versions, canManage, userId, perSongKey, globalPreferredKey, instrument, todayServiceId, sharedLiveNow }: Props) {
   const [openVersion, setOpenVersion] = useState<string | null>(
     versions.find(v => v.reviewed_at)?.id ?? versions[0]?.id ?? null
   )
@@ -44,16 +46,22 @@ export default function SongDetailClient({ song, versions, canManage, userId, pr
   async function toggleShareLive() {
     if (!todayServiceId) return
     setShareBusy(true)
-    const { createClient: createBrowserClient } = await import('@/lib/supabase/client')
-    const supabase = createBrowserClient()
-    const { error } = await supabase.from('session_state').update({
-      impromptu_library_song_id: isSharedLive ? null : song.id,
-      impromptu_key: null,
-      updated_at: new Date().toISOString(),
-      updated_by: userId,
-    }).eq('service_id', todayServiceId)
-    setShareBusy(false)
-    if (!error) setIsSharedLive(v => !v)
+    try {
+      const { createClient: createBrowserClient } = await import('@/lib/supabase/client')
+      const supabase = createBrowserClient()
+      // set_impromptu upserts atomically — a plain .update() no-ops when the
+      // session_state row doesn't exist yet (pre-v5 services) and a full upsert
+      // would reset the live position. The RPC touches only the impromptu cols.
+      const { error } = await supabase.rpc('set_impromptu', {
+        p_service_id: todayServiceId,
+        p_library_song_id: isSharedLive ? null : song.id,
+        p_key: null,
+      })
+      if (error) console.error('[library] share-live failed', error)
+      else setIsSharedLive(v => !v)
+    } finally {
+      setShareBusy(false)
+    }
   }
 
   async function saveMeta() {
@@ -76,7 +84,7 @@ export default function SongDetailClient({ song, versions, canManage, userId, pr
   }
 
   async function deleteVersion(id: string) {
-    if (!window.confirm('Delete this chord version? The original PDF stays in storage.')) return
+    if (!window.confirm('Delete this chord version? Its original PDF is removed too.')) return
     setDeleting(id)
     const res = await fetch(`/api/library/versions/${id}`, { method: 'DELETE' })
     setDeleting(null)
@@ -201,9 +209,11 @@ export default function SongDetailClient({ song, versions, canManage, userId, pr
                   <ChordSheetViewer
                     body={v.content}
                     storedKey={v.stored_key}
-                    initialKey={preferredKey}
+                    initialKey={perSongKey}
                     librarySongId={song.id}
                     userId={userId}
+                    instrument={instrument}
+                    preferredKey={globalPreferredKey}
                   />
                   {canManage && (
                     <div className="mt-4 flex gap-2">

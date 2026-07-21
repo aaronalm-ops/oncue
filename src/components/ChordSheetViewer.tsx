@@ -3,15 +3,18 @@
 import { useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import ChordSheet from '@/components/ChordSheet'
-import { ALL_KEYS, keyIndex, transposeBody } from '@/lib/chords/format'
+import { ALL_KEYS, keyIndex, transposeBody, transposeHint } from '@/lib/chords/format'
 
 interface Props {
   body: string
   storedKey: string | null // the key the sheet is written in
-  initialKey?: string | null // preferred/target key to open in
+  initialKey?: string | null // preferred/target key to open in (per-song)
   librarySongId: string
   userId: string | null // null = don't persist preference
   highContrast?: boolean
+  instrument?: string | null // for the capo / keyboard-transpose hint
+  preferredKey?: string | null // global default key; null = actual
+  actualKey?: string | null // sounding key (chart scale); defaults to storedKey
 }
 
 /**
@@ -19,11 +22,14 @@ interface Props {
  * and (like the instrument selector) saves the user's preferred scale for
  * this song — next time it opens in their key.
  */
-export default function ChordSheetViewer({ body, storedKey, initialKey, librarySongId, userId, highContrast = false }: Props) {
+export default function ChordSheetViewer({ body, storedKey, initialKey, librarySongId, userId, highContrast = false, instrument = null, preferredKey = null, actualKey = null }: Props) {
   const canTranspose = storedKey !== null && keyIndex(storedKey) !== null
-  const [targetKey, setTargetKey] = useState<string>(
-    (initialKey && keyIndex(initialKey) !== null ? initialKey : null) ?? storedKey ?? ''
-  )
+  const [targetKey, setTargetKey] = useState<string>(() => {
+    // per-song override → global preferred → chart scale → sheet's own key
+    const candidates = [initialKey, preferredKey, actualKey, storedKey]
+    for (const c of candidates) if (c && keyIndex(c) !== null) return c
+    return storedKey ?? ''
+  })
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -50,9 +56,24 @@ export default function ChordSheetViewer({ body, storedKey, initialKey, libraryS
   }, [body, storedKey, targetKey, canTranspose])
 
   const hc = highContrast
+  const sounding = actualKey ?? storedKey
+  const shownKey = canTranspose && targetKey ? targetKey : storedKey
+  const hint = transposeHint(sounding, shownKey, instrument)
 
   return (
     <div>
+      {hint && hint.value !== 0 && (
+        <div className="mb-2.5 flex items-center gap-2">
+          <span className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold bg-purple-600 text-white">
+            {hint.label}
+          </span>
+          <span className={`text-[10px] leading-tight ${hc ? 'text-zinc-500' : 'text-zinc-500'}`}>
+            {hint.mode === 'capo'
+              ? `capo up — chords shown in ${shownKey}`
+              : `play in ${shownKey}, sounds in ${sounding}`}
+          </span>
+        </div>
+      )}
       {canTranspose ? (
         <div className="mb-3 -mx-1 px-1 flex items-center gap-1 overflow-x-auto no-scrollbar">
           <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-widest mr-1 ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>

@@ -21,6 +21,7 @@ interface Props {
   chordsBySongId: Record<string, SongChordsData>
   prefsByLibraryId: Record<string, string>
   canMapSections: boolean
+  preferredKey: string | null // global transpose preference; null = actual
 }
 
 // Extracted to top-level so it never remounts on parent re-render
@@ -178,7 +179,7 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
   )
 }
 
-export default function MyPartClient({ serviceId, songs, instruments, userInstrument, userId, initialNotes, chordsBySongId, prefsByLibraryId, canMapSections }: Props) {
+export default function MyPartClient({ serviceId, songs, instruments, userInstrument, userId, initialNotes, chordsBySongId, prefsByLibraryId, canMapSections, preferredKey }: Props) {
   const [viewInstrument, setViewInstrument] = useState(userInstrument ?? instruments[0] ?? '')
   const [layout, setLayout] = useState<'song' | 'scroll'>('song')
   const [activeSongIdx, setActiveSongIdx] = useState(0)
@@ -554,6 +555,8 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
               currentSectionIdx={null}
               highContrast={hc}
               canMapSections={canMapSections}
+              instrument={viewInstrument}
+              preferredKey={preferredKey}
             />
           </div>
         </div>

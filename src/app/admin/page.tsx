@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import AdminClient from './AdminClient'
-import type { AppRole } from '@/lib/types'
+import type { AppRole, AppTeam } from '@/lib/types'
 
 export default async function AdminPage() {
   const supabase = await createClient()
@@ -17,7 +17,7 @@ export default async function AdminPage() {
 
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, display_name, instrument, role, created_at')
+    .select('id, display_name, instrument, role, teams, created_at')
     .order('created_at', { ascending: true })
 
   const { count: serviceCount } = await supabase
@@ -46,6 +46,7 @@ export default async function AdminPage() {
     display_name: p.display_name as string | null,
     instrument: p.instrument as string | null,
     role: (p.role ?? 'member') as AppRole,
+    teams: ((p as { teams?: string[] }).teams ?? []) as AppTeam[],
     email: emailMap[p.id] ?? null,
   }))
 

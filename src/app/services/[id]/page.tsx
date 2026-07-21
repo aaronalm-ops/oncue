@@ -2,6 +2,10 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { canSeeChords } from '@/lib/chords/access'
+import { fetchServiceChords } from '@/lib/chords/service-chords'
+import LeaderBadge from '@/components/LeaderBadge'
+import { buildYouTubePlaylist, extractYouTubeId } from '@/lib/youtube'
+import type { AppTeam } from '@/lib/types'
 
 const DAY_GRADIENT: Record<string, string> = {
   THURSDAY: 'from-purple-900/30 to-transparent',
@@ -18,11 +22,17 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   const supabase = await createClient()
 
   const [{ data: service }, { data: { user } }] = await Promise.all([
-    supabase.from('services').select('id, service_date, day_of_week, instruments').eq('id', id).single(),
+    supabase.from('services').select('id, service_date, day_of_week, instruments, worship_leader_id').eq('id', id).single(),
     supabase.auth.getUser(),
   ])
 
   if (!service) notFound()
+
+  // Worship leader for this setlist — shown by their initials avatar
+  const leaderId = (service as { worship_leader_id?: string | null }).worship_leader_id ?? null
+  const { data: leader } = leaderId
+    ? await supabase.from('public_profiles').select('display_name, instrument, teams').eq('id', leaderId).maybeSingle()
+    : { data: null }
 
   const { data: profile } = user
     ? await supabase.from('profiles').select('role').eq('id', user.id).single()
@@ -39,19 +49,19 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   // Which songs have chords available (via confirmed link, or title match)?
   // Gated to editors until the parser rollout opens chords to everyone.
   const chordsVisible = canSeeChords(role)
-  type SongRow = { id: string; order_index: number; title: string; scale: string | null; in_chart?: boolean }
+  type SongRow = { id: string; order_index: number; title: string; scale: string | null; in_chart?: boolean; reference_links?: string[] }
   let songs: SongRow[] = []
   if (chordsVisible) {
     const res = await supabase
       .from('songs')
-      .select('id, order_index, title, scale, in_chart')
+      .select('id, order_index, title, scale, in_chart, reference_links')
       .eq('service_id', id)
       .order('order_index')
     if (res.error) {
       // v5 migration (in_chart) not applied yet — degrade gracefully
       const fallback = await supabase
         .from('songs')
-        .select('id, order_index, title, scale')
+        .select('id, order_index, title, scale, reference_links')
         .eq('service_id', id)
         .order('order_index')
       songs = (fallback.data ?? []) as SongRow[]
@@ -60,30 +70,16 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
     }
   }
 
-  const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
-  const songIds = songs.map(s => s.id)
-  const [{ data: links }, { data: librarySongs }] = await Promise.all([
-    songIds.length
-      ? supabase.from('song_links').select('song_id, library_song_id').in('song_id', songIds)
-      : Promise.resolve({ data: [] as { song_id: string; library_song_id: string }[] }),
-    supabase.from('library_songs').select('id, title, song_versions(id, reviewed_at)'),
-  ])
-  const linkMap = new Map((links ?? []).map(l => [l.song_id, l.library_song_id]))
-  const reviewedLib = new Map(
-    (librarySongs ?? [])
-      .filter(ls => (ls.song_versions ?? []).some(v => v.reviewed_at !== null))
-      .map(ls => [norm(ls.title), ls.id]),
-  )
-  const reviewedLibIds = new Set(
-    (librarySongs ?? [])
-      .filter(ls => (ls.song_versions ?? []).some(v => v.reviewed_at !== null))
-      .map(ls => ls.id),
-  )
-  const songChords = songs.map(s => {
-    const linked = linkMap.get(s.id)
-    const libId = linked && reviewedLibIds.has(linked) ? linked : reviewedLib.get(norm(s.title)) ?? null
-    return { ...s, hasChords: libId !== null }
-  })
+  // Practice playlist — anonymous YouTube queue from the songs' reference links
+  const playlist = buildYouTubePlaylist(songs.flatMap(s => s.reference_links ?? []))
+  const songsWithVideo = songs.filter(s => (s.reference_links ?? []).some(l => extractYouTubeId(l))).length
+
+  // Single source of truth — the SAME resolver the chord panes use (QA #10),
+  // so this list can never advertise chords a pane won't actually show.
+  const { chordsBySongId } = chordsVisible && user && songs.length
+    ? await fetchServiceChords(supabase, songs, user.id)
+    : { chordsBySongId: {} as Record<string, unknown> }
+  const songChords = songs.map(s => ({ ...s, hasChords: !!chordsBySongId[s.id] }))
   const anyChords = songChords.some(s => s.hasChords)
 
   return (
@@ -104,6 +100,15 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
             </span>
             <h1 className="text-2xl font-bold leading-tight">{dateLabel}</h1>
             <p className="text-zinc-500 text-sm mt-2">{service.instruments.join(' · ')}</p>
+            {leader && (
+              <div className="mt-3">
+                <LeaderBadge
+                  name={(leader as { display_name?: string | null }).display_name ?? null}
+                  instrument={(leader as { instrument?: string | null }).instrument ?? null}
+                  teams={((leader as { teams?: string[] }).teams ?? []) as AppTeam[]}
+                />
+              </div>
+            )}
           </div>
         </div>
 
@@ -172,12 +177,34 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
                 ) : (
                   <div key={s.id} className="flex items-center gap-3 rounded-xl px-4 py-3 border border-zinc-900">
                     <span className="flex-1 min-w-0 text-sm text-zinc-600 truncate">{s.title}</span>
-                    <span className="shrink-0 text-[10px] text-zinc-700">no chords</span>
+                    <span className="shrink-0 text-[10px] font-semibold text-amber-500/80">needs chords</span>
                   </div>
                 )
               ))}
             </div>
           </div>
+        )}
+
+        {playlist.url && (
+          <a
+            href={playlist.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-4 bg-zinc-900 rounded-2xl px-5 py-4 active:bg-zinc-800 transition-colors border border-zinc-800/50"
+          >
+            <div className="w-10 h-10 rounded-full bg-red-600/15 flex items-center justify-center shrink-0">
+              <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M23.5 6.2a3 3 0 00-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 00.5 6.2 31 31 0 000 12a31 31 0 00.5 5.8 3 3 0 002.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 002.1-2.1A31 31 0 0024 12a31 31 0 00-.5-5.8zM9.5 15.5v-7l6.3 3.5-6.3 3.5z" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-white text-sm">Practice playlist</p>
+              <p className="text-xs text-zinc-500">{songsWithVideo} of {songs.length} songs · opens in YouTube</p>
+            </div>
+            <svg className="w-4 h-4 text-zinc-600 ml-auto shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
         )}
 
         <a

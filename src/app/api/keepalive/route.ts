@@ -3,8 +3,14 @@ import { createClient } from '@/lib/supabase/server'
 
 // Called by Vercel Cron every 5 days — keeps the Supabase free project from pausing.
 export async function GET(request: NextRequest) {
+  const secret = process.env.CRON_SECRET
+  // Fail CLOSED when the secret is missing — otherwise the check degrades to
+  // comparing against "Bearer undefined", which any caller can send.
+  if (!secret) {
+    return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 })
+  }
   const authHeader = request.headers.get('authorization')
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (authHeader !== `Bearer ${secret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 

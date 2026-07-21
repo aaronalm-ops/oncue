@@ -6,6 +6,7 @@ interface SongInput {
   title: string
   scale: string | null
   order_index: number
+  library_song_id?: string | null // set for a newly added library song
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -27,37 +28,40 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const existingIds = new Set((existing ?? []).map(s => s.id))
   const incomingIds = new Set(songs.filter(s => s.id).map(s => s.id!))
 
-  // Delete songs removed from the list (cascades sections + instructions)
+  // Delete songs removed from the list (cascades sections + instructions).
+  // Scope to the service so a stray id can never touch another service's rows.
   const toDelete = [...existingIds].filter(id => !incomingIds.has(id))
   if (toDelete.length > 0) {
-    const { error } = await supabase.from('songs').delete().in('id', toDelete)
+    const { error } = await supabase.from('songs').delete().eq('service_id', serviceId).in('id', toDelete)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  // Update existing songs (title, scale, order)
-  for (const song of songs.filter(s => s.id)) {
+  // Update existing songs (title, scale, order) — but ONLY ones that actually
+  // belong to this service; a client-supplied id from elsewhere no-ops.
+  for (const song of songs.filter(s => s.id && existingIds.has(s.id))) {
     const { error } = await supabase.from('songs').update({
       title: song.title,
       scale: song.scale,
       order_index: song.order_index,
-    }).eq('id', song.id!)
+    }).eq('id', song.id!).eq('service_id', serviceId)
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   }
 
-  // Insert new songs (no sections — added manually)
-  const newSongs = songs.filter(s => !s.id)
-  if (newSongs.length > 0) {
-    const { error } = await supabase.from('songs').insert(
-      newSongs.map(s => ({
-        service_id: serviceId,
-        title: s.title,
-        scale: s.scale,
-        medley_group: null,
-        reference_links: [],
-        order_index: s.order_index,
-      }))
-    )
+  // Insert new songs via add_setlist_song so they get library-linked and any
+  // saved arrangement (flow + notes + link) pre-fills; then set their order to
+  // match the submitted position.
+  for (const s of songs.filter(x => !x.id)) {
+    const { data, error } = await supabase.rpc('add_setlist_song', {
+      p_service_id: serviceId,
+      p_title: s.title,
+      p_scale: s.scale ?? '',
+      p_library_song_id: s.library_song_id ?? null,
+    })
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    const newId = (data as { song_id?: string } | null)?.song_id
+    if (newId) {
+      await supabase.from('songs').update({ order_index: s.order_index }).eq('id', newId).eq('service_id', serviceId)
+    }
   }
 
   return NextResponse.json({ success: true })

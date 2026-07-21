@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
-import type { AppRole } from '@/lib/types'
+import { TEAMS, type AppRole, type AppTeam } from '@/lib/types'
 
 function canChangeRole(actorRole: AppRole, targetRole: AppRole, newRole: AppRole): boolean {
   if (actorRole === 'master') return true
@@ -25,7 +25,21 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  const { id, role: newRole } = await request.json() as { id: string; role: AppRole }
+  const body = await request.json() as { id: string; role?: AppRole; teams?: AppTeam[] }
+  const { id } = body
+
+  // Teams are a soft tag — any admin/master may set anyone's (including their own).
+  // Validate against the allowed set so nothing outside {worship,sound,media} lands.
+  if (body.teams !== undefined) {
+    const allowed = new Set<AppTeam>(TEAMS)
+    const teams = [...new Set(body.teams)].filter((t): t is AppTeam => allowed.has(t as AppTeam))
+    const { error } = await supabase.from('profiles').update({ teams }).eq('id', id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ success: true })
+  }
+
+  const newRole = body.role
+  if (!newRole) return NextResponse.json({ error: 'No role provided' }, { status: 400 })
 
   if (id === user.id) {
     return NextResponse.json({ error: 'Cannot change your own role' }, { status: 400 })

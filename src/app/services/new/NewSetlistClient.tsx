@@ -4,42 +4,33 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import SongPicker, { type PickedSong } from '@/components/SongPicker'
 
 interface Leader { id: string; name: string; isLeader: boolean }
-interface LibrarySongOption {
-  id: string
-  title: string
-  artist: string | null
-  hasChords: boolean
-  defaultKey: string | null
-}
 
 interface SetlistSong {
   title: string
   scale: string
   library_song_id: string | null
+  hasChords: boolean
 }
 
 interface Props {
   leaders: Leader[]
-  librarySongs: LibrarySongOption[]
   currentUserId: string
 }
 
 /**
  * Setlist-first flow: create the service on Monday, before the conductor's
- * chart exists. Songs picked from the library are chord-linked immediately.
- * Wednesday's chart upload MERGES onto this (matching by title), keeping
- * links and notes while taking the conductor's order and sections.
+ * chart exists. Songs are searched by title AND lyrics; repeating songs pre-fill
+ * flow + notes + YouTube from last time. Wednesday's chart merges onto this.
  */
-export default function NewSetlistClient({ leaders, librarySongs, currentUserId }: Props) {
+export default function NewSetlistClient({ leaders, currentUserId }: Props) {
   const [date, setDate] = useState('')
   const [leaderId, setLeaderId] = useState(
     leaders.find(l => l.isLeader)?.id ?? leaders.find(l => l.id === currentUserId)?.id ?? ''
   )
   const [songs, setSongs] = useState<SetlistSong[]>([])
-  const [query, setQuery] = useState('')
-  const [customTitle, setCustomTitle] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
@@ -53,24 +44,8 @@ export default function NewSetlistClient({ leaders, librarySongs, currentUserId 
     return null
   }, [date])
 
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return []
-    return librarySongs
-      .filter(s => s.title.toLowerCase().includes(q) || (s.artist ?? '').toLowerCase().includes(q))
-      .slice(0, 6)
-  }, [query, librarySongs])
-
-  function addFromLibrary(s: LibrarySongOption) {
-    setSongs(prev => [...prev, { title: s.title, scale: s.defaultKey ?? '', library_song_id: s.id }])
-    setQuery('')
-  }
-
-  function addCustom() {
-    const t = customTitle.trim()
-    if (!t) return
-    setSongs(prev => [...prev, { title: t, scale: '', library_song_id: null }])
-    setCustomTitle('')
+  function addFromPick(s: PickedSong) {
+    setSongs(prev => [...prev, { title: s.title, scale: '', library_song_id: s.library_song_id, hasChords: s.hasChords }])
   }
 
   function move(idx: number, dir: -1 | 1) {
@@ -149,41 +124,11 @@ export default function NewSetlistClient({ leaders, librarySongs, currentUserId 
             </div>
           </div>
 
-          {/* Song picker */}
+          {/* Song picker — searches title AND lyrics */}
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Add songs</label>
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Search the library…"
-              className="mt-1 w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-purple-600"
-            />
-            {matches.length > 0 && (
-              <div className="mt-1 rounded-xl border border-zinc-800 overflow-hidden">
-                {matches.map(s => (
-                  <button key={s.id} onClick={() => addFromLibrary(s)}
-                    className="w-full flex items-center gap-2 px-3 py-2.5 text-left bg-zinc-900 active:bg-zinc-800 border-b border-zinc-800 last:border-b-0">
-                    <span className="flex-1 min-w-0 text-sm truncate">{s.title}</span>
-                    {s.defaultKey && <span className="shrink-0 text-[10px] font-bold text-purple-400">{s.defaultKey}</span>}
-                    <span className={`shrink-0 text-[10px] ${s.hasChords ? 'text-green-500' : 'text-zinc-600'}`}>
-                      {s.hasChords ? 'chords ✓' : 'no chords'}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="mt-2 flex gap-2">
-              <input
-                value={customTitle}
-                onChange={e => setCustomTitle(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') addCustom() }}
-                placeholder="…or type a song not in the library"
-                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-purple-600"
-              />
-              <button onClick={addCustom} disabled={!customTitle.trim()}
-                className="px-3 py-2 rounded-xl bg-zinc-800 text-sm text-zinc-300 disabled:opacity-40">
-                Add
-              </button>
+            <div className="mt-1">
+              <SongPicker onPick={addFromPick} />
             </div>
           </div>
 
@@ -200,9 +145,9 @@ export default function NewSetlistClient({ leaders, librarySongs, currentUserId 
                     placeholder="Key" size={3}
                     className="w-12 bg-zinc-800 border border-zinc-700 rounded-lg px-1.5 py-1 text-xs text-center text-white placeholder:text-zinc-600 focus:outline-none focus:border-purple-600"
                   />
-                  {s.library_song_id
-                    ? <span className="shrink-0 text-[10px] text-green-500">linked</span>
-                    : <span className="shrink-0 text-[10px] text-zinc-600">new</span>}
+                  {!s.hasChords && (
+                    <span className="shrink-0 text-[10px] font-semibold text-amber-500" title="No chord sheet yet — upload one later">needs chords</span>
+                  )}
                   <button onClick={() => move(i, -1)} disabled={i === 0} className="text-zinc-500 disabled:opacity-20 px-1">↑</button>
                   <button onClick={() => move(i, 1)} disabled={i === songs.length - 1} className="text-zinc-500 disabled:opacity-20 px-1">↓</button>
                   <button onClick={() => setSongs(prev => prev.filter((_, xi) => xi !== i))} className="text-zinc-600 px-1">✕</button>
@@ -218,8 +163,9 @@ export default function NewSetlistClient({ leaders, librarySongs, currentUserId 
             {saving ? 'Creating…' : 'Create setlist'}
           </button>
           <p className="text-[11px] text-zinc-600">
-            When the conductor&rsquo;s Excel is uploaded for this date, it merges onto this setlist:
-            songs are matched by title, chord links and notes survive, and the chart&rsquo;s order takes over.
+            Repeating songs keep last time&rsquo;s flow, conductor notes and practice link. When the
+            conductor&rsquo;s Excel is uploaded for this date it merges on: matched by title, links and
+            notes survive, the chart&rsquo;s order takes over.
           </p>
         </div>
       </div>

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import Avatar from '@/components/Avatar'
 
 interface Service {
   id: string
@@ -31,10 +32,12 @@ export default function ServicesClient({
   services,
   isPrivileged,
   todayStr,
+  leaders = {},
 }: {
   services: Service[]
   isPrivileged: boolean
   todayStr: string
+  leaders?: Record<string, { name: string | null }>
 }) {
   const [query, setQuery] = useState('')
   const [deleting, setDeleting] = useState<string | null>(null)
@@ -143,7 +146,14 @@ export default function ServicesClient({
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-zinc-500 mt-0.5 truncate">{s.source_filename}</p>
+                  {leaders[s.id] ? (
+                    <div className="flex items-center gap-1.5 mt-1" title={`Led by ${leaders[s.id].name ?? 'worship leader'}`}>
+                      <Avatar name={leaders[s.id].name} size={18} />
+                      <span className="text-xs text-zinc-500 truncate">Led by {leaders[s.id].name ?? 'worship leader'}</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-500 mt-0.5 truncate">{s.source_filename}</p>
+                  )}
                 </Link>
 
                 {/* WhatsApp share */}

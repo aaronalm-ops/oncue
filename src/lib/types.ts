@@ -53,11 +53,31 @@ export interface UserNote {
 
 export type AppRole = 'master' | 'admin' | 'worship_leader' | 'member'
 
+// Team tags — a separate, softer axis from role (see v9_profiles_teams.sql).
+export type AppTeam = 'worship' | 'sound' | 'media'
+export const TEAMS: AppTeam[] = ['worship', 'sound', 'media']
+export const TEAM_LABELS: Record<AppTeam, string> = {
+  worship: 'Worship',
+  sound: 'Sound',
+  media: 'Media',
+}
+
 export interface Profile {
   id: string
   instrument: string | null
   display_name: string | null
   role: AppRole
+  preferred_key: string | null // global transpose preference; null = actual key
+  teams: AppTeam[]
+  profile_completed_at: string | null
+}
+
+// Safe, everyone-readable subset (public_profiles view) — no email/role.
+export interface PublicProfile {
+  id: string
+  display_name: string | null
+  instrument: string | null
+  teams: AppTeam[]
 }
 
 // Enriched types for UI

@@ -25,22 +25,6 @@ export default async function NewSetlistPage() {
     isLeader: p.role === 'worship_leader',
   }))
 
-  // Library songs with a reviewed version can be linked at creation
-  const { data: librarySongs } = await supabase
-    .from('library_songs')
-    .select('id, title, artist, song_versions(id, stored_key, reviewed_at)')
-    .order('title', { ascending: true })
-
-  const songs = (librarySongs ?? []).map(ls => {
-    const reviewed = (ls.song_versions ?? []).find(v => v.reviewed_at !== null)
-    return {
-      id: ls.id,
-      title: ls.title,
-      artist: ls.artist,
-      hasChords: !!reviewed,
-      defaultKey: reviewed?.stored_key ?? null,
-    }
-  })
-
-  return <NewSetlistClient leaders={leaders} librarySongs={songs} currentUserId={user.id} />
+  // Songs are searched server-side (title + lyrics) via the SongPicker.
+  return <NewSetlistClient leaders={leaders} currentUserId={user.id} />
 }

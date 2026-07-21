@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import type { AppRole } from '@/lib/types'
+import Avatar from '@/components/Avatar'
+import { TEAMS, TEAM_LABELS, type AppRole, type AppTeam } from '@/lib/types'
 
 interface Member {
   id: string
@@ -10,6 +11,7 @@ interface Member {
   email: string | null
   instrument: string | null
   role: AppRole
+  teams: AppTeam[]
 }
 
 interface Props {
@@ -113,6 +115,25 @@ export default function AdminClient({ members: initial, actorRole, actorId, serv
     }
   }
 
+  async function toggleTeam(id: string, team: AppTeam, current: AppTeam[]) {
+    const next = current.includes(team) ? current.filter(t => t !== team) : [...current, team]
+    setLoading(id)
+    setError(null)
+    // optimistic — teams are a soft tag, snap back on failure
+    setMembers(m => m.map(mb => mb.id === id ? { ...mb, teams: next } : mb))
+    const res = await fetch('/api/admin/members', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, teams: next }),
+    })
+    setLoading(null)
+    if (!res.ok) {
+      setMembers(m => m.map(mb => mb.id === id ? { ...mb, teams: current } : mb))
+      const data = await res.json().catch(() => ({}))
+      setError(data.error ?? 'Failed to update teams')
+    }
+  }
+
   async function removeMember(id: string) {
     setLoading(id)
     setConfirmDelete(null)
@@ -174,7 +195,6 @@ export default function AdminClient({ members: initial, actorRole, actorId, serv
           {sorted.map(member => {
             const actions = getActions(member, actorRole, actorId)
             const name = member.display_name ?? member.email ?? 'Unknown'
-            const initials = name.split(' ').map(w => w[0]).filter(Boolean).join('').slice(0, 2).toUpperCase()
             const isLoading = loading === member.id
             const isYou = member.id === actorId
             const subtitle = [
@@ -189,9 +209,7 @@ export default function AdminClient({ members: initial, actorRole, actorId, serv
                 key={member.id}
                 className="bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-3 flex items-center gap-3"
               >
-                <div className="w-9 h-9 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center shrink-0">
-                  <span className="text-xs font-bold text-zinc-300">{initials || '?'}</span>
-                </div>
+                <Avatar name={name} size={36} />
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -202,6 +220,26 @@ export default function AdminClient({ members: initial, actorRole, actorId, serv
                   {subtitle && (
                     <p className="text-xs text-zinc-500 mt-0.5 truncate">{subtitle}</p>
                   )}
+                  {/* Team tags — tap to toggle (soft, non-security) */}
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {TEAMS.map(t => {
+                      const on = member.teams.includes(t)
+                      return (
+                        <button
+                          key={t}
+                          onClick={() => toggleTeam(member.id, t, member.teams)}
+                          disabled={isLoading}
+                          className={`text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors disabled:opacity-50 ${
+                            on
+                              ? 'bg-purple-900/40 text-purple-300 border-purple-800/50'
+                              : 'bg-zinc-950 text-zinc-600 border-zinc-800 active:bg-zinc-900'
+                          }`}
+                        >
+                          {TEAM_LABELS[t]}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
 
                 {!isYou && actions.length > 0 && (

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import ChordSheet from '@/components/ChordSheet'
-import { ALL_KEYS, deriveSections, keyIndex, mapChartSectionsToChords, normalizeSectionLabelFull, transposeBody } from '@/lib/chords/format'
+import { ALL_KEYS, deriveSections, keyIndex, mapChartSectionsToChords, normalizeSectionLabelFull, transposeBody, transposeHint } from '@/lib/chords/format'
 import type { SongChordsData } from '@/lib/chords/service-chords'
 
 interface Props {
@@ -11,11 +11,13 @@ interface Props {
   chartLabels: string[]
   chords: SongChordsData | null
   songScale: string | null // the chart's key for this song
-  initialKey: string | null // user's saved preference
+  initialKey: string | null // user's saved PER-SONG preference (overrides global)
   userId: string
   currentSectionIdx: number | null // live position; null = no follow (My Part)
   highContrast: boolean
   canMapSections?: boolean // editors: allow mapping unmatched chart sections
+  instrument?: string | null // for the capo / keyboard-transpose hint
+  preferredKey?: string | null // global default key; null = actual, no transpose
 }
 
 /**
@@ -24,7 +26,7 @@ interface Props {
  * live section is highlighted and kept in view, and the key strip transposes
  * with the user's per-song preference saved — same behaviour everywhere.
  */
-export default function ChordsPane({ songTitle, chartLabels, chords, songScale, initialKey, userId, currentSectionIdx, highContrast, canMapSections = false }: Props) {
+export default function ChordsPane({ songTitle, chartLabels, chords, songScale, initialKey, userId, currentSectionIdx, highContrast, canMapSections = false, instrument = null, preferredKey = null }: Props) {
   const hc = highContrast
   const storedKey = chords?.storedKey ?? null
   const canTranspose = storedKey !== null && keyIndex(storedKey) !== null
@@ -46,7 +48,8 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
   }
 
   const [targetKey, setTargetKey] = useState<string>(() => {
-    const candidates = [initialKey, songScale, storedKey]
+    // per-song override → global preferred key → chart scale → sheet's own key
+    const candidates = [initialKey, preferredKey, songScale, storedKey]
     for (const c of candidates) if (c && keyIndex(c) !== null) return c
     return storedKey ?? ''
   })
@@ -111,8 +114,27 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
     )
   }
 
+  // The band sounds in the chart key; chords are shown in `shownKey`. The hint
+  // tells this instrument how to bridge the two (capo / keyboard transpose).
+  const actualKey = songScale ?? storedKey
+  const shownKey = canTranspose && targetKey ? targetKey : storedKey
+  const hint = transposeHint(actualKey, shownKey, instrument)
+
   return (
     <div>
+      {/* Capo / keyboard-transpose hint */}
+      {hint && hint.value !== 0 && (
+        <div className="mb-2.5 flex items-center gap-2">
+          <span className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-bold bg-purple-600 text-white">
+            {hint.label}
+          </span>
+          <span className={`text-[10px] leading-tight ${hc ? 'text-zinc-500' : 'text-zinc-500'}`}>
+            {hint.mode === 'capo'
+              ? `capo up — chords shown in ${shownKey}`
+              : `play in ${shownKey}, sounds in ${actualKey}`}
+          </span>
+        </div>
+      )}
       {/* Key strip */}
       {canTranspose && (
         <div className="mb-3 -mx-1 px-1 flex items-center gap-1 overflow-x-auto no-scrollbar">

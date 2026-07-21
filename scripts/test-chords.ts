@@ -180,6 +180,19 @@ async function main() {
   check(transposeBody('[A]Thank [E/G#]You', 'A', 'Bb') === '[Bb]Thank [F/A]You', 'body A→Bb spells flats')
   check(transposeBody('[G]x [??]y', 'G', 'A') === '[A]x [??]y', 'unknown tokens pass through untouched')
   check(transposeBody('[G]x', 'G', 'G') === '[G]x', 'same key = unchanged')
+  // #8: bracketed annotations starting with a note letter must NOT transpose
+  check(transposeBody('[Build]', 'G', 'A') === '[Build]', '[Build] annotation survives (was [C#uild])')
+  check(transposeBody('[G]Go [Instrumental] [D]', 'G', 'A') === '[A]Go [Instrumental] [E]', 'chords move, [Instrumental] stays')
+  check(transposeBody('[Bridge]', 'C', 'D') === '[Bridge]', '[Bridge] survives transpose')
+
+  // ---- Instrument-aware transpose hint (capo / keyboard) ----
+  console.log('\n=== transpose hint')
+  const { transposeHint } = await import('../src/lib/chords/format')
+  check(transposeHint('E', 'F', 'Keyboard')?.label === 'Transpose -1', 'keyboard: E song, F shown → -1')
+  check(transposeHint('E', 'C', 'Acoustic Guitar')?.label === 'Capo 4', 'guitar: E song, C shown → Capo 4')
+  check(transposeHint('E', 'E', 'Keyboard')?.label === 'No transpose', 'keyboard: same key → No transpose')
+  check(transposeHint('E', 'C', 'Bass Guitar') === null, 'bass gets no capo hint')
+  check(transposeHint('E', 'C', 'Violin') === null, 'concert-pitch instrument gets no hint')
 
   // ---- Chart-flow reorder checks ----
   console.log('\n=== reorder to chart flow')

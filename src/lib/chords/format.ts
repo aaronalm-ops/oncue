@@ -8,8 +8,8 @@
  *   plain text             → lyric line without chords
  *   (To Verse)  [ to end]  → annotations survive verbatim inside lines
  *
- * Stored in song_versions.content_chordpro. chord_sections rows are derived
- * from this text on approve.
+ * Stored in song_versions.content_chordpro. Sections are derived from this
+ * text on demand (approval validity check + viewer) — never persisted.
  */
 
 export interface ChordToken {
@@ -108,7 +108,7 @@ export function parseInlineChords(line: string): ChordToken[] {
   return parts
 }
 
-/** Derive chord_sections rows from body text. Content before any header gets an implicit "Song" section. */
+/** Derive sections from body text. Content before any header gets an implicit "Song" section. */
 export function deriveSections(body: string): DerivedSection[] {
   const sections: DerivedSection[] = []
   let currentLabel: string | null = null
@@ -203,9 +203,56 @@ export function transposeBody(body: string, fromKey: string, toKey: string): str
   if (from === null || to === null) return body
   const semitones = ((to - from) % 12 + 12) % 12
   if (semitones === 0) return body
-  return body.replace(/\[([^\]\n]{1,24})\]/g, (_full, chord: string) => {
-    return `[${transposeChord(chord, semitones, toKey)}]`
+  return body.replace(/\[([^\]\n]{1,24})\]/g, (full, chord: string) => {
+    // Only transpose real chords — bracketed annotations like [Build],
+    // [Instrumental], [Interlude] must survive verbatim (else B→C# = "Cuild").
+    return isChordToken(chord) ? `[${transposeChord(chord, semitones, toKey)}]` : full
   })
+}
+
+// ============================================================
+// Instrument-aware transpose hint. The band always sounds in the chart key
+// (`actualKey`); the chords on screen are shown in `targetKey` (the player's
+// preferred/fingering key). This tells each instrument how to bridge the two:
+//   guitar   → a capo position   (play targetKey shapes, capo up to actualKey)
+//   keyboard → a transpose number (play targetKey, dial the keyboard to sound
+//              in actualKey — e.g. actual E, target F → -1)
+//   anything else → no hint (they read the actual key)
+// ============================================================
+
+export type TransposeMode = 'capo' | 'keyboard' | 'none'
+
+export function instrumentTransposeMode(instrument: string | null | undefined): TransposeMode {
+  const i = (instrument ?? '').toLowerCase()
+  if (/key|piano|synth|organ/.test(i)) return 'keyboard'
+  if (/guitar|ukulele|capo/.test(i) && !/bass/.test(i)) return 'capo'
+  return 'none'
+}
+
+export interface TransposeHint {
+  mode: 'capo' | 'keyboard'
+  value: number // capo: 0..11 frets; keyboard: -5..+6 semitones
+  label: string // e.g. "Capo 4", "Transpose -1", "No capo"
+}
+
+/** How this instrument bridges the sounding key to the shown key, or null. */
+export function transposeHint(
+  actualKey: string | null | undefined,
+  targetKey: string | null | undefined,
+  instrument: string | null | undefined,
+): TransposeHint | null {
+  const mode = instrumentTransposeMode(instrument)
+  if (mode === 'none' || !actualKey || !targetKey) return null
+  const a = keyIndex(actualKey)
+  const t = keyIndex(targetKey)
+  if (a === null || t === null) return null
+  const raw = ((a - t) % 12 + 12) % 12 // semitones the shown key sits below actual
+  if (mode === 'capo') {
+    return { mode, value: raw, label: raw === 0 ? 'No capo' : `Capo ${raw}` }
+  }
+  let n = raw
+  if (n > 6) n -= 12 // nearest signed dial, -5..+6
+  return { mode, value: n, label: n === 0 ? 'No transpose' : `Transpose ${n > 0 ? '+' : ''}${n}` }
 }
 
 // ============================================================

@@ -77,14 +77,25 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   return NextResponse.json(data)
 }
 
-/** DELETE: remove a version (sections cascade; the PDF stays in storage) */
+/** DELETE: remove a version and clean up its PDF (bulk delete already did this;
+ *  the single-version path used to orphan the file in storage). */
 export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const { supabase, error } = await requireEditor()
   if (error) return error
 
+  // Read the PDF path before the row is gone.
+  const { data: version } = await supabase
+    .from('song_versions').select('source_pdf_path').eq('id', id).maybeSingle()
+
   const { error: delErr } = await supabase.from('song_versions').delete().eq('id', id)
   if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 })
+
+  const pdfPath = (version as { source_pdf_path?: string | null } | null)?.source_pdf_path
+  if (pdfPath) {
+    // Best-effort — the version is already deleted; a leftover file must not 500 the caller.
+    await supabase.storage.from('chord-pdfs').remove([pdfPath])
+  }
 
   return NextResponse.json({ success: true })
 }

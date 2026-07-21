@@ -1,10 +1,16 @@
 import type { createClient } from '@/lib/supabase/server'
+import { keyIndex } from '@/lib/chords/format'
 
 /**
  * Server-side resolver: which songs in a service have reviewed chords,
- * and what key does this user prefer for each? Shared by Live Sync and
- * My Part so the combined chart+chords panes stay consistent.
+ * and what key does this user prefer for each? THE single source of truth
+ * for chord resolution — Live Sync, My Part, and the service page all call
+ * this so they can never advertise chords a pane won't show (QA #10).
  */
+
+/** Normalise a song title for fuzzy library matching. Exported so every
+ *  resolution path uses identical matching. */
+export const normTitle = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
 
 export interface SongChordsData {
   librarySongId: string
@@ -19,13 +25,12 @@ export interface ServiceChords {
   prefsByLibraryId: Record<string, string>
 }
 
-const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
-
 export async function fetchServiceChords(
   supabase: Awaited<ReturnType<typeof createClient>>,
-  songs: Array<{ id: string; title: string }>,
+  songs: Array<{ id: string; title: string; scale?: string | null }>,
   userId: string,
 ): Promise<ServiceChords> {
+  const norm = normTitle
   const empty: ServiceChords = { chordsBySongId: {}, prefsByLibraryId: {} }
   if (songs.length === 0) return empty
 
@@ -55,9 +60,12 @@ export async function fetchServiceChords(
     .not('reviewed_at', 'is', null)
     .order('reviewed_at', { ascending: false })
 
-  const latestByLib = new Map<string, { stored_key: string | null; content_chordpro: string | null }>()
+  // All reviewed versions per library song, newest first (query is ordered).
+  const versionsByLib = new Map<string, Array<{ stored_key: string | null; content_chordpro: string | null }>>()
   for (const v of versions ?? []) {
-    if (!latestByLib.has(v.library_song_id)) latestByLib.set(v.library_song_id, v)
+    const arr = versionsByLib.get(v.library_song_id) ?? []
+    arr.push(v)
+    versionsByLib.set(v.library_song_id, arr)
   }
 
   const [{ data: prefs }, { data: maps }] = await Promise.all([
@@ -81,12 +89,21 @@ export async function fetchServiceChords(
 
   const chordsBySongId: Record<string, SongChordsData> = {}
   for (const [songId, libId] of songToLib) {
-    const v = latestByLib.get(libId)
-    if (v?.content_chordpro) {
+    const cands = versionsByLib.get(libId) ?? []
+    if (cands.length === 0) continue
+    // #12 arrangement match: prefer a reviewed version written in the chart's
+    // key over merely the newest one, so multi-key songs pick the right sheet.
+    const scale = songs.find(s => s.id === songId)?.scale ?? null
+    const scaleIdx = scale ? keyIndex(scale) : null
+    const chosen =
+      (scaleIdx !== null
+        ? cands.find(c => c.stored_key && keyIndex(c.stored_key) === scaleIdx)
+        : undefined) ?? cands[0]
+    if (chosen?.content_chordpro) {
       chordsBySongId[songId] = {
         librarySongId: libId,
-        storedKey: v.stored_key,
-        body: v.content_chordpro,
+        storedKey: chosen.stored_key,
+        body: chosen.content_chordpro,
         sectionMaps: mapsByLib.get(libId) ?? {},
       }
     }

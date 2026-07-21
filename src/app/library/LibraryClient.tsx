@@ -220,7 +220,7 @@ export default function LibraryClient({ songs: initial, role, pendingUploads }: 
                         {reviewedCount === totalVersions ? '✓ Ready' : `${reviewedCount}/${totalVersions} reviewed`}
                       </span>
                     ) : (
-                      <span className="text-xs text-zinc-700">No chords</span>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-950 text-amber-500 border border-amber-900/50">Needs chords</span>
                     )}
                   </div>
                   {!selectMode && (

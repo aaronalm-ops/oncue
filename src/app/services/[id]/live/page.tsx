@@ -11,7 +11,7 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
   const { data: { user } } = await supabase.auth.getUser()
   const { data: profile } = await supabase
     .from('profiles')
-    .select('instrument, role')
+    .select('instrument, role, preferred_key')
     .eq('id', user!.id)
     .single()
 
@@ -125,6 +125,7 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
       prefsByLibraryId={chords.prefsByLibraryId}
       canMapSections={isEditor}
       initialImpromptu={initialImpromptu}
+      preferredKey={(profile as { preferred_key?: string | null } | null)?.preferred_key ?? null}
     />
   )
 }

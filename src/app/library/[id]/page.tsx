@@ -9,7 +9,7 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login')
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+  const { data: profile } = await supabase.from('profiles').select('role, instrument, preferred_key').eq('id', user.id).single()
   const role = (profile?.role ?? 'member') as AppRole
 
   const { data: song } = await supabase
@@ -69,7 +69,9 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
       versions={versions}
       canManage={canManage}
       userId={user.id}
-      preferredKey={pref?.preferred_key ?? null}
+      perSongKey={pref?.preferred_key ?? null}
+      globalPreferredKey={(profile as { preferred_key?: string | null } | null)?.preferred_key ?? null}
+      instrument={(profile as { instrument?: string | null } | null)?.instrument ?? null}
       todayServiceId={todayService?.id ?? null}
       sharedLiveNow={sharedLiveNow}
     />
