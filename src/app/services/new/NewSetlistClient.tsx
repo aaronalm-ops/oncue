@@ -143,11 +143,33 @@ export default function NewSetlistClient({ leaders, currentUserId }: Props) {
 
     setSaving(false)
     router.push(`/services/${existing.id}`)
-    router.refresh()
-  }
+      }
 
   function addFromPick(s: PickedSong) {
     setSongs(prev => [...prev, { title: s.title, scale: '', library_song_id: s.library_song_id, hasChords: s.hasChords }])
+    // Prefill the ORIGINAL key (the sheet's own key from the latest reviewed
+    // version) — useful when the leader wants "whatever it was written in".
+    // Only fills if the field is still empty when the lookup returns.
+    if (s.library_song_id) {
+      const libId = s.library_song_id
+      const title = s.title
+      createClient()
+        .from('song_versions')
+        .select('stored_key')
+        .eq('library_song_id', libId)
+        .not('reviewed_at', 'is', null)
+        .order('reviewed_at', { ascending: false })
+        .limit(1)
+        .then(({ data }) => {
+          const k = data?.[0]?.stored_key
+          if (!k) return
+          setSongs(prev => prev.map(x =>
+            x.library_song_id === libId && x.title === title && x.scale === ''
+              ? { ...x, scale: k }
+              : x
+          ))
+        })
+    }
   }
 
   function move(idx: number, dir: -1 | 1) {
@@ -182,8 +204,7 @@ export default function NewSetlistClient({ leaders, currentUserId }: Props) {
     setSaving(false)
     if (rpcErr) { setError(rpcErr.message); return }
     router.push(`/services/${(data as { service_id: string }).service_id}`)
-    router.refresh()
-  }
+      }
 
   return (
     <div className="min-h-screen bg-black text-white">

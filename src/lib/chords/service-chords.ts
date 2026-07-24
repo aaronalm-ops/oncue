@@ -31,7 +31,9 @@ export async function fetchServiceChords(
   supabase: Awaited<ReturnType<typeof createClient>>,
   songs: Array<{ id: string; title: string; scale?: string | null }>,
   userId: string,
+  options?: { light?: boolean }, // light: existence/keys only — no chord bodies, prefs or maps (fast badges)
 ): Promise<ServiceChords> {
+  const light = options?.light === true
   const norm = normTitle
   const empty: ServiceChords = { chordsBySongId: {}, prefsByLibraryId: {} }
   if (songs.length === 0) return empty
@@ -60,23 +62,35 @@ export async function fetchServiceChords(
   const libIds = [...new Set(songToLib.values())]
   if (libIds.length === 0) return empty
 
-  // Latest reviewed version per library song (RLS hides unreviewed from members anyway)
-  const { data: versions } = await supabase
-    .from('song_versions')
-    .select('library_song_id, stored_key, content_chordpro, reviewed_at')
-    .in('library_song_id', libIds)
-    .not('reviewed_at', 'is', null)
-    .order('reviewed_at', { ascending: false })
+  // Latest reviewed version per library song (RLS hides unreviewed from members
+  // anyway). In light mode we skip the (potentially large) chord bodies —
+  // existence + key is all the badges need.
+  const { data: versions } = light
+    ? await supabase
+        .from('song_versions')
+        .select('library_song_id, stored_key, reviewed_at')
+        .in('library_song_id', libIds)
+        .not('reviewed_at', 'is', null)
+        .not('content_chordpro', 'is', null)
+        .order('reviewed_at', { ascending: false })
+    : await supabase
+        .from('song_versions')
+        .select('library_song_id, stored_key, content_chordpro, reviewed_at')
+        .in('library_song_id', libIds)
+        .not('reviewed_at', 'is', null)
+        .not('content_chordpro', 'is', null)
+        .order('reviewed_at', { ascending: false })
 
   // All reviewed versions per library song, newest first (query is ordered).
-  const versionsByLib = new Map<string, Array<{ stored_key: string | null; content_chordpro: string | null }>>()
-  for (const v of versions ?? []) {
+  type VRow = { library_song_id: string; stored_key: string | null; content_chordpro?: string | null }
+  const versionsByLib = new Map<string, VRow[]>()
+  for (const v of (versions ?? []) as VRow[]) {
     const arr = versionsByLib.get(v.library_song_id) ?? []
     arr.push(v)
     versionsByLib.set(v.library_song_id, arr)
   }
 
-  const [{ data: prefs }, { data: maps }] = await Promise.all([
+  const [{ data: prefs }, { data: maps }] = light ? [{ data: null }, { data: null }] : await Promise.all([
     supabase
       .from('user_scale_preferences')
       .select('library_song_id, preferred_key')
@@ -107,11 +121,11 @@ export async function fetchServiceChords(
       (scaleIdx !== null
         ? cands.find(c => c.stored_key && keyIndex(c.stored_key) === scaleIdx)
         : undefined) ?? cands[0]
-    if (chosen?.content_chordpro) {
+    if (light ? !!chosen : !!chosen?.content_chordpro) {
       chordsBySongId[songId] = {
         librarySongId: libId,
         storedKey: chosen.stored_key,
-        body: chosen.content_chordpro,
+        body: chosen.content_chordpro ?? '',
         sectionMaps: mapsByLib.get(libId) ?? {},
         tempoBpm: tempoByLib.get(libId) ?? null,
       }

@@ -99,8 +99,7 @@ export default function EditSetlistClient({ serviceId, serviceDate, leaders, ini
     if (res.ok) {
       setDirty(false)
       router.push(`/services/${serviceId}`)
-      router.refresh()
-    } else {
+          } else {
       const data = await res.json()
       setError(data.error ?? 'Failed to save')
     }

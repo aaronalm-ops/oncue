@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { canSeeChords } from '@/lib/chords/access'
 import WorshipLeaderPicker from '@/components/WorshipLeaderPicker'
+import ShareSetlist from '@/components/ShareSetlist'
 import { fetchServiceChords } from '@/lib/chords/service-chords'
 import LeaderBadge from '@/components/LeaderBadge'
 import { buildYouTubePlaylist, extractYouTubeId } from '@/lib/youtube'
@@ -29,23 +30,23 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
 
   if (!service) notFound()
 
-  // Worship leader for this setlist — shown by their initials avatar
+  // Stage 2: everything that only depends on stage 1 — in parallel (perf)
   const leaderId = (service as { worship_leader_id?: string | null }).worship_leader_id ?? null
-  const { data: leader } = leaderId
-    ? await supabase.from('public_profiles').select('display_name, instrument, teams').eq('id', leaderId).maybeSingle()
-    : { data: null }
-
-  const { data: profile } = user
-    ? await supabase.from('profiles').select('role').eq('id', user.id).single()
-    : { data: null }
+  const [leaderRes, profileRes, leaderOptionsRes] = await Promise.all([
+    leaderId
+      ? supabase.from('public_profiles').select('display_name, instrument, teams').eq('id', leaderId).maybeSingle()
+      : Promise.resolve({ data: null }),
+    user
+      ? supabase.from('profiles').select('role').eq('id', user.id).single()
+      : Promise.resolve({ data: null }),
+    supabase.from('public_profiles').select('id, display_name, role').order('display_name', { ascending: true }),
+  ])
+  const leader = leaderRes.data
+  const profile = profileRes.data as { role?: string } | null
 
   const role = profile?.role ?? 'member'
   const canEdit = role !== 'member'
-
-  // Leader options for the inline picker (editors only; safe columns via view)
-  const { data: leaderOptions } = canEdit
-    ? await supabase.from('public_profiles').select('id, display_name, role').order('display_name', { ascending: true })
-    : { data: null }
+  const leaderOptions = canEdit ? leaderOptionsRes.data : null
   const pickerOptions = (leaderOptions ?? []).map(p => ({
     id: p.id as string,
     name: (p.display_name as string | null) || 'Unnamed member',
@@ -88,10 +89,12 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   // Single source of truth — the SAME resolver the chord panes use (QA #10),
   // so this list can never advertise chords a pane won't actually show.
   const { chordsBySongId } = chordsVisible && user && songs.length
-    ? await fetchServiceChords(supabase, songs, user.id)
+    ? await fetchServiceChords(supabase, songs, user.id, { light: true }) // badges only — no bodies
     : { chordsBySongId: {} as Record<string, unknown> }
   const songChords = songs.map(s => ({ ...s, hasChords: !!chordsBySongId[s.id] }))
-  const anyChords = songChords.some(s => s.hasChords)
+  // Show the section whenever there are songs — "needs chords" rows are the
+  // one-tap upload entry, most valuable when NOTHING has chords yet.
+  const anyChords = songChords.length > 0
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -149,6 +152,22 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
             </svg>
           </Link>
 
+          <Link
+            href={`/services/${id}/live`}
+            className="flex items-center gap-4 bg-zinc-900 rounded-2xl px-5 py-5 active:bg-zinc-800 transition-colors border border-purple-900/50"
+          >
+            <div className="w-11 h-11 rounded-full bg-purple-900/40 flex items-center justify-center shrink-0">
+              <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse" />
+            </div>
+            <div>
+              <p className="font-semibold text-white">Live Service</p>
+              <p className="text-zinc-400 text-sm">Follow the flow together, section by section</p>
+            </div>
+            <svg className="w-4 h-4 text-zinc-600 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </Link>
+
           {canEdit && (
             <Link
               href={`/services/${id}/edit`}
@@ -169,6 +188,13 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
             </Link>
           )}
         </div>
+
+        <ShareSetlist
+          serviceDate={service.service_date}
+          dayOfWeek={service.day_of_week}
+          songs={songs.map(s => ({ id: s.id, title: s.title, scale: s.scale }))}
+          playlistUrl={playlist.url}
+        />
 
         {anyChords && (
           <div>

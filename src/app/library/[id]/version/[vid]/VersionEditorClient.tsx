@@ -111,8 +111,7 @@ export default function VersionEditorClient({ songId, songTitle, version, pdfUrl
     setDirty(false)
     try { localStorage.removeItem(draftKey) } catch { /* noop */ }
     router.push(`/library/${songId}`)
-    router.refresh()
-  }
+      }
 
   const panes: { id: Pane; label: string; show: boolean }[] = [
     { id: 'edit', label: 'Edit', show: true },
