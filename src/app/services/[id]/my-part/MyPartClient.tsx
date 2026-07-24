@@ -122,8 +122,60 @@ function SectionCard({ section, viewInstrument, hc, fg, dim, cardBg, note, isEdi
   )
 }
 
+function TempoChip({ tempo, canEdit, onSave, hc, dim }: {
+  tempo: number | null
+  canEdit: boolean
+  onSave: (bpm: number | null) => void
+  hc: boolean
+  dim: string
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  function commit() {
+    const n = parseInt(draft, 10)
+    onSave(Number.isFinite(n) && n >= 30 && n <= 300 ? n : null)
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <span className="flex items-center gap-1 shrink-0">
+        <input
+          value={draft}
+          onChange={e => setDraft(e.target.value.replace(/\D/g, '').slice(0, 3))}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+          onBlur={commit}
+          autoFocus
+          inputMode="numeric"
+          placeholder="bpm"
+          className={`w-14 rounded-lg px-1.5 py-0.5 text-xs text-center focus:outline-none border ${
+            hc ? 'bg-white border-zinc-400 text-black' : 'bg-zinc-800 border-purple-600 text-white'
+          }`}
+        />
+      </span>
+    )
+  }
+
+  if (tempo === null && !canEdit) return null
+
+  return (
+    <button
+      onClick={() => { if (canEdit) { setDraft(tempo != null ? String(tempo) : ''); setEditing(true) } }}
+      className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-lg border transition-colors ${
+        tempo != null
+          ? (hc ? 'bg-zinc-200 border-zinc-300 text-zinc-700' : 'bg-zinc-800 border-zinc-700 text-zinc-300')
+          : `border-dashed ${hc ? 'border-zinc-400 text-zinc-500' : 'border-zinc-700 ' + dim}`
+      }`}
+      title={canEdit ? 'Tap to set tempo — saved to this song for everyone' : undefined}
+    >
+      {tempo != null ? `${tempo} bpm` : '+ bpm'}
+    </button>
+  )
+}
+
 function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNote, openNotes,
-  saving, onToggleNote, onStartEdit, onSaveNote, onCancelEdit, compact }: {
+  saving, onToggleNote, onStartEdit, onSaveNote, onCancelEdit, compact, tempo, canEditTempo, onSaveTempo }: {
   song: Song
   viewInstrument: string
   hc: boolean; fg: string; dim: string; cardBg: string
@@ -136,6 +188,9 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
   onSaveNote: (sectionId: string, text: string) => void
   onCancelEdit: () => void
   compact?: boolean
+  tempo: number | null
+  canEditTempo: boolean
+  onSaveTempo: (bpm: number | null) => void
 }) {
   return (
     <div className={`space-y-2 ${compact ? 'pt-6' : ''}`}>
@@ -146,6 +201,7 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
             {song.scale}
           </span>
         )}
+        <TempoChip tempo={tempo} canEdit={canEditTempo} onSave={onSaveTempo} hc={hc} dim={dim} />
         {song.medley_group && <span className={`text-[10px] ${dim}`}>MEDLEY</span>}
         {song.reference_links[0] && (
           <a href={song.reference_links[0]} target="_blank" rel="noopener noreferrer"
@@ -202,6 +258,34 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   const swipeRef = useRef<HTMLDivElement | null>(null)
 
   const hasAnyChords = songs.some(s => chordsBySongId[s.id])
+
+  // Song tempo memory (v14): lives on the library song, shown/edited here
+  const [tempos, setTempos] = useState<Record<string, number | null>>(() => {
+    const t: Record<string, number | null> = {}
+    for (const s of songs) {
+      const c = chordsBySongId[s.id]
+      if (c) t[c.librarySongId] = c.tempoBpm
+    }
+    return t
+  })
+
+  function saveTempo(librarySongId: string, bpm: number | null) {
+    setTempos(prev => ({ ...prev, [librarySongId]: bpm })) // optimistic
+    getClient()
+      .from('library_songs')
+      .update({ tempo_bpm: bpm })
+      .eq('id', librarySongId)
+      .then(({ error }) => { if (error) console.error('tempo save failed', error.message) })
+  }
+
+  function tempoPropsFor(song: Song) {
+    const c = chordsBySongId[song.id]
+    return {
+      tempo: c ? tempos[c.librarySongId] ?? null : null,
+      canEditTempo: !!c,
+      onSaveTempo: (bpm: number | null) => { if (c) saveTempo(c.librarySongId, bpm) },
+    }
+  }
 
   function onSwipeScroll() {
     const el = swipeRef.current
@@ -523,12 +607,12 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       <div className={hasAnyChords ? 'min-w-full lg:min-w-0 snap-center overflow-y-auto h-full' : 'flex-1 min-h-0 overflow-y-auto'}>
       <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
         {layout === 'song' ? (
-          <SongBlock song={activeSong} {...sharedProps} />
+          <SongBlock song={activeSong} {...sharedProps} {...tempoPropsFor(activeSong)} />
         ) : (
           <div className="space-y-6">
             {songs.map((song, si) => (
               <div key={song.id} id={`song-${si}`}>
-                <SongBlock song={song} {...sharedProps} compact />
+                <SongBlock song={song} {...sharedProps} {...tempoPropsFor(song)} compact />
               </div>
             ))}
           </div>

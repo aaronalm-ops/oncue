@@ -18,6 +18,8 @@ export interface SongChordsData {
   body: string
   /** manual chart→chord section maps (chart label normalized → chord section label) */
   sectionMaps: Record<string, string>
+  /** song memory: canonical tempo on library_songs (v14), editable from My Part */
+  tempoBpm: number | null
 }
 
 export interface ServiceChords {
@@ -35,13 +37,19 @@ export async function fetchServiceChords(
   if (songs.length === 0) return empty
 
   const songIds = songs.map(s => s.id)
-  const [{ data: links }, { data: librarySongs }] = await Promise.all([
+  const [{ data: links }, libRes] = await Promise.all([
     supabase.from('song_links').select('song_id, library_song_id').in('song_id', songIds),
-    supabase.from('library_songs').select('id, title'),
+    supabase.from('library_songs').select('id, title, tempo_bpm'),
   ])
+  // v14 migration (tempo_bpm) not applied yet? Degrade gracefully.
+  const librarySongs: Array<{ id: string; title: string; tempo_bpm?: number | null }> =
+    libRes.error
+      ? (await supabase.from('library_songs').select('id, title')).data ?? []
+      : libRes.data ?? []
 
   const linkMap = new Map((links ?? []).map(l => [l.song_id, l.library_song_id]))
-  const byTitle = new Map((librarySongs ?? []).map(ls => [norm(ls.title), ls.id]))
+  const byTitle = new Map(librarySongs.map(ls => [norm(ls.title), ls.id]))
+  const tempoByLib = new Map(librarySongs.map(ls => [ls.id, ls.tempo_bpm ?? null]))
 
   // Resolve each service song to a library song (confirmed link wins)
   const songToLib = new Map<string, string>()
@@ -105,6 +113,7 @@ export async function fetchServiceChords(
         storedKey: chosen.stored_key,
         body: chosen.content_chordpro,
         sectionMaps: mapsByLib.get(libId) ?? {},
+        tempoBpm: tempoByLib.get(libId) ?? null,
       }
     }
   }
