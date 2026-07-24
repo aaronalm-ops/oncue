@@ -31,11 +31,13 @@ const DAY_ACCENT: Record<string, string> = {
 export default function ServicesClient({
   services,
   isPrivileged,
+  canCreateSetlist,
   todayStr,
   leaders = {},
 }: {
   services: Service[]
   isPrivileged: boolean
+  canCreateSetlist: boolean
   todayStr: string
   leaders?: Record<string, { name: string | null }>
 }) {
@@ -72,9 +74,10 @@ export default function ServicesClient({
       <div className="text-zinc-500 text-center py-16">
         <p>No services yet.</p>
         {isPrivileged && <p className="text-sm mt-1">Upload a chart to get started.</p>}
-        {isPrivileged && (
-          <Link href="/services/new" className="inline-block mt-3 text-purple-400 text-sm">
-            + Create a setlist before the chart arrives
+        {canCreateSetlist && (
+          <Link href="/services/new"
+            className="inline-flex items-center gap-2 mt-4 rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white active:scale-95 transition-transform">
+            + New Setlist
           </Link>
         )}
       </div>
@@ -83,13 +86,21 @@ export default function ServicesClient({
 
   return (
     <div className="space-y-3">
-      {isPrivileged && (
+      {canCreateSetlist && (
         <Link href="/services/new"
-          className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700 px-4 py-2.5 text-sm text-zinc-400 active:bg-zinc-900 transition-colors">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          className="flex items-center gap-4 rounded-2xl bg-gradient-to-r from-purple-700 to-purple-600 px-5 py-4 shadow-lg shadow-purple-950/40 active:scale-[0.99] transition-transform">
+          <div className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center shrink-0">
+            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-white">New Setlist</p>
+            <p className="text-purple-200/80 text-xs">Start here — plan the next service</p>
+          </div>
+          <svg className="w-4 h-4 text-purple-200 ml-auto shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
-          New setlist — before the chart arrives
         </Link>
       )}
 

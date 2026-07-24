@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { canSeeChords } from '@/lib/chords/access'
+import WorshipLeaderPicker from '@/components/WorshipLeaderPicker'
 import { fetchServiceChords } from '@/lib/chords/service-chords'
 import LeaderBadge from '@/components/LeaderBadge'
 import { buildYouTubePlaylist, extractYouTubeId } from '@/lib/youtube'
@@ -40,6 +41,16 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
 
   const role = profile?.role ?? 'member'
   const canEdit = role !== 'member'
+
+  // Leader options for the inline picker (editors only; safe columns via view)
+  const { data: leaderOptions } = canEdit
+    ? await supabase.from('public_profiles').select('id, display_name, role').order('display_name', { ascending: true })
+    : { data: null }
+  const pickerOptions = (leaderOptions ?? []).map(p => ({
+    id: p.id as string,
+    name: (p.display_name as string | null) || 'Unnamed member',
+    isLeader: p.role === 'worship_leader',
+  }))
 
   const date = new Date(service.service_date + 'T00:00:00')
   const dateLabel = date.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
@@ -109,6 +120,13 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
                 />
               </div>
             )}
+            <WorshipLeaderPicker
+              serviceId={id}
+              currentId={leaderId}
+              options={pickerOptions}
+              canEdit={canEdit}
+              hasLeader={!!leader}
+            />
           </div>
         </div>
 

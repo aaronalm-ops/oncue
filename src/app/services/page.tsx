@@ -78,6 +78,7 @@ export default async function ServicesPage() {
         <ServicesClient
           services={services ?? []}
           isPrivileged={isPrivileged}
+          canCreateSetlist={['master', 'admin', 'worship_leader'].includes(role)}
           todayStr={new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date())}
           leaders={leaders}
         />
