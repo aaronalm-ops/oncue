@@ -3,10 +3,20 @@ import { createClient } from '@/lib/supabase/server'
 import LibraryClient from './LibraryClient'
 import type { AppRole } from '@/lib/types'
 
-export default async function LibraryPage() {
+export default async function LibraryPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login')
+
+  // "Add chords" intent from a service song row
+  const sp = await searchParams
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null
+  const attachSong = one(sp.attachSong)
+  const attachService = one(sp.attachService)
+  const attachTitle = one(sp.attachTitle)
+  const attachIntent = attachSong && attachService && attachTitle
+    ? { songId: attachSong, serviceId: attachService, title: attachTitle }
+    : null
 
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
   const role = (profile?.role ?? 'member') as AppRole
@@ -44,6 +54,7 @@ export default async function LibraryPage() {
       songs={(data ?? []) as Parameters<typeof LibraryClient>[0]['songs']}
       role={role}
       pendingUploads={pendingUploads}
+      attachIntent={attachIntent}
     />
   )
 }

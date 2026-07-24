@@ -23,7 +23,7 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   const supabase = await createClient()
 
   const [{ data: service }, { data: { user } }] = await Promise.all([
-    supabase.from('services').select('id, service_date, day_of_week, instruments, worship_leader_id').eq('id', id).single(),
+    supabase.from('services').select('id, service_date, day_of_week, instruments, worship_leader_id, source_filename').eq('id', id).single(),
     supabase.auth.getUser(),
   ])
 
@@ -193,10 +193,19 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
                     </svg>
                   </Link>
                 ) : (
-                  <div key={s.id} className="flex items-center gap-3 rounded-xl px-4 py-3 border border-zinc-900">
-                    <span className="flex-1 min-w-0 text-sm text-zinc-600 truncate">{s.title}</span>
-                    <span className="shrink-0 text-[10px] font-semibold text-amber-500/80">needs chords</span>
-                  </div>
+                  <Link
+                    key={s.id}
+                    href={`/library?attachSong=${s.id}&attachService=${id}&attachTitle=${encodeURIComponent(s.title)}`}
+                    className="flex items-center gap-3 rounded-xl px-4 py-3 border border-zinc-800/70 active:bg-zinc-900 transition-colors"
+                  >
+                    <span className="flex-1 min-w-0 text-sm text-zinc-400 truncate">{s.title}</span>
+                    <span className="shrink-0 flex items-center gap-1 text-[10px] font-semibold text-amber-500">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m5 12V8m0 0l-4 4m4-4l4 4" />
+                      </svg>
+                      add chords
+                    </span>
+                  </Link>
                 )
               ))}
             </div>
@@ -225,15 +234,23 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
           </a>
         )}
 
-        <a
-          href={`/api/services/${id}/download`}
-          className="flex items-center gap-2 text-zinc-600 text-sm py-2 active:text-zinc-400 transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
-          </svg>
-          Download original chart
-        </a>
+        {/* Only setlists that came from (or were merged with) a conductor's
+            Excel have a file to download — setlist drafts don't yet. */}
+        {service.source_filename !== 'setlist-draft' ? (
+          <a
+            href={`/api/services/${id}/download`}
+            className="flex items-center gap-2 text-zinc-600 text-sm py-2 active:text-zinc-400 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+            </svg>
+            Download original chart
+          </a>
+        ) : (
+          <p className="text-zinc-700 text-xs py-2">
+            No conductor chart uploaded yet — the download appears once the Excel is in.
+          </p>
+        )}
       </div>
     </div>
   )

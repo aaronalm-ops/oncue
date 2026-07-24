@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 export interface PendingUpload {
@@ -65,7 +65,13 @@ function suggestFor(title: string, songs: MatchSuggestion[]): MatchSuggestion[] 
     .slice(0, 5)
 }
 
-export default function ChordUploadQueue({ initialUploads, librarySongs }: Props) {
+export interface AttachIntent {
+  songId: string // the service song to link once chords are confirmed
+  serviceId: string
+  title: string // the chart's title for that song (display + prefill hint)
+}
+
+export default function ChordUploadQueue({ initialUploads, librarySongs, attachIntent = null }: Props & { attachIntent?: AttachIntent | null }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [cards, setCards] = useState<CardState[]>(
     initialUploads.map(u => toCard(u, suggestFor(u.draft_title ?? '', librarySongs)))
@@ -73,6 +79,16 @@ export default function ChordUploadQueue({ initialUploads, librarySongs }: Props
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
   const router = useRouter()
+  const attachDoneRef = useRef(false)
+  const pickerOpenedRef = useRef(false)
+
+  // Arrived via a service song's "add chords" — open the file picker right away
+  useEffect(() => {
+    if (attachIntent && !pickerOpenedRef.current) {
+      pickerOpenedRef.current = true
+      inputRef.current?.click()
+    }
+  }, [attachIntent])
 
   function patchCard(id: string, patch: Partial<CardState>) {
     setCards(prev => prev.map(c => (c.upload.id === id ? { ...c, ...patch } : c)))
@@ -143,6 +159,25 @@ export default function ChordUploadQueue({ initialUploads, librarySongs }: Props
       return
     }
     setCards(prev => prev.filter(c => c.upload.id !== card.upload.id))
+
+    // Came here from a service song's "add chords"? Link that song to the
+    // confirmed library entry, then jump straight to review & approve.
+    if (attachIntent && !attachDoneRef.current && data.library_song_id) {
+      attachDoneRef.current = true
+      const { createClient: createBrowserClient } = await import('@/lib/supabase/client')
+      const supabase = createBrowserClient()
+      const { error: linkErr } = await supabase
+        .from('song_links')
+        .upsert(
+          { song_id: attachIntent.songId, library_song_id: data.library_song_id },
+          { onConflict: 'song_id', ignoreDuplicates: false },
+        )
+      if (linkErr) console.error('service-song link failed', linkErr.message)
+      if (data.version_id) {
+        router.push(`/library/${data.library_song_id}/version/${data.version_id}`)
+        return
+      }
+    }
     router.refresh()
   }
 
@@ -167,6 +202,20 @@ export default function ChordUploadQueue({ initialUploads, librarySongs }: Props
 
   return (
     <div className="mb-6">
+      {attachIntent && (
+        <div className="mb-3 rounded-xl border border-purple-800/60 bg-purple-950/40 px-3 py-2.5 flex items-center gap-2">
+          <p className="flex-1 min-w-0 text-xs text-purple-200">
+            Adding chords for <span className="font-semibold">&ldquo;{attachIntent.title}&rdquo;</span> —
+            upload its PDF, confirm, then approve. It links back to the service automatically.
+          </p>
+          <button
+            onClick={() => router.replace('/library')}
+            className="shrink-0 text-[11px] text-purple-300 underline underline-offset-2"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       <input
         ref={inputRef}
         type="file"

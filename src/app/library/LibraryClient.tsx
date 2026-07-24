@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { AppRole } from '@/lib/types'
-import ChordUploadQueue, { type PendingUpload } from '@/components/ChordUploadQueue'
+import ChordUploadQueue, { type PendingUpload, type AttachIntent } from '@/components/ChordUploadQueue'
 
 interface SongVersion {
   id: string
@@ -25,9 +25,10 @@ interface Props {
   songs: LibrarySong[]
   role: AppRole
   pendingUploads: PendingUpload[]
+  attachIntent?: AttachIntent | null
 }
 
-export default function LibraryClient({ songs: initial, role, pendingUploads }: Props) {
+export default function LibraryClient({ songs: initial, role, pendingUploads, attachIntent = null }: Props) {
   const [songs, setSongs] = useState(initial)
   const [query, setQuery] = useState('')
   const [showAdd, setShowAdd] = useState(false)
@@ -158,6 +159,7 @@ export default function LibraryClient({ songs: initial, role, pendingUploads }: 
           <ChordUploadQueue
             initialUploads={pendingUploads}
             librarySongs={songs.map(s => ({ id: s.id, title: s.title, artist: s.artist }))}
+            attachIntent={attachIntent}
           />
         )}
 
