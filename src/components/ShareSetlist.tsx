@@ -1,8 +1,15 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { deriveSections } from '@/lib/chords/format'
 
-interface ShareSong { id: string; title: string; scale: string | null }
+interface ShareSong {
+  id: string
+  title: string
+  scale: string | null
+  librarySongId: string | null // null = no chord sheet → no lyrics available
+}
 
 interface Props {
   serviceDate: string // YYYY-MM-DD
@@ -23,16 +30,117 @@ function shareDateLabel(serviceDate: string, dayOfWeek: string): string {
   return `${dow}, ${day}${suffix} ${month}`
 }
 
-/**
- * Share the setlist to WhatsApp in the team's message format, with optional
- * per-song notes ("Chorus and 2nd stanza only") and the practice playlist.
- * If every song is in the same key, one "All on the Key X" line replaces the
- * per-song keys.
- */
+/** Chord body section → plain lyrics: strip [chords], drop flow markers and
+ *  lines that were chords-only (instrumentals). */
+function lyricsOf(content: string): string {
+  const out: string[] = []
+  for (const raw of content.split('\n')) {
+    const line = raw.replace(/\s+$/, '')
+    if (line.trim().startsWith('> ')) continue // flow marker
+    const stripped = line.replace(/\[[^\]\n]{1,24}\]/g, '')
+    const hadChords = stripped !== line
+    if (stripped.trim() === '') {
+      if (!hadChords && line.trim() === '') out.push('') // keep real blank lines
+      continue // chord-only line → skip
+    }
+    out.push(stripped.replace(/ {2,}/g, ' ').trimEnd())
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+interface SongSections {
+  sections: Array<{ label: string; lyrics: string }>
+}
+
 export default function ShareSetlist({ serviceDate, dayOfWeek, songs, playlistUrl }: Props) {
   const [open, setOpen] = useState(false)
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [includePlaylist, setIncludePlaylist] = useState(playlistUrl !== null)
+  const [includeLyrics, setIncludeLyrics] = useState(false)
+  // songId → sections derived from its chord sheet (null = not loaded yet)
+  const [lyricsBySong, setLyricsBySong] = useState<Record<string, SongSections> | null>(null)
+  const [loadingLyrics, setLoadingLyrics] = useState(false)
+  // songId → set of selected section indexes
+  const [selected, setSelected] = useState<Record<string, Set<number>>>({})
+  const [copied, setCopied] = useState(false)
+  const [copiedSongId, setCopiedSongId] = useState<string | null>(null)
+
+  /** Copy one song's lyrics directly — selected sections, or the whole song
+   *  when nothing is selected. For manual pasting anywhere. */
+  async function copySongLyrics(songId: string, title: string) {
+    const info = lyricsBySong?.[songId]
+    if (!info) return
+    const sel = selected[songId] ?? new Set<number>()
+    const useAll = sel.size === 0
+    const parts: string[] = [`*${title}*`]
+    info.sections.forEach((sec, idx) => {
+      if (!useAll && !sel.has(idx)) return
+      parts.push(`_${sec.label}:_`)
+      parts.push(sec.lyrics)
+      parts.push('')
+    })
+    try {
+      await navigator.clipboard.writeText(parts.join('\n').trimEnd())
+      setCopiedSongId(songId)
+      setTimeout(() => setCopiedSongId(prev => (prev === songId ? null : prev)), 2000)
+    } catch { /* clipboard unavailable */ }
+  }
+
+  const lyricCapable = songs.filter(s => s.librarySongId !== null)
+
+  // Fetch chord bodies only when lyrics are first requested — keeps the page light
+  useEffect(() => {
+    if (!includeLyrics || lyricsBySong !== null || lyricCapable.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      setLoadingLyrics(true)
+      const libIds = [...new Set(lyricCapable.map(s => s.librarySongId!))]
+      const { data } = await createClient()
+        .from('song_versions')
+        .select('library_song_id, content_chordpro, reviewed_at')
+        .in('library_song_id', libIds)
+        .not('reviewed_at', 'is', null)
+        .not('content_chordpro', 'is', null)
+        .order('reviewed_at', { ascending: false })
+      if (cancelled) return
+      const bodyByLib = new Map<string, string>()
+      for (const v of data ?? []) {
+        if (!bodyByLib.has(v.library_song_id) && v.content_chordpro) {
+          bodyByLib.set(v.library_song_id, v.content_chordpro)
+        }
+      }
+      const result: Record<string, SongSections> = {}
+      for (const s of lyricCapable) {
+        const body = bodyByLib.get(s.librarySongId!)
+        if (!body) continue
+        const sections = deriveSections(body)
+          .map(sec => ({ label: sec.label, lyrics: lyricsOf(sec.content) }))
+          .filter(sec => sec.lyrics !== '')
+        if (sections.length > 0) result[s.id] = { sections }
+      }
+      setLyricsBySong(result)
+      setLoadingLyrics(false)
+    })()
+    return () => { cancelled = true }
+  }, [includeLyrics, lyricsBySong, lyricCapable])
+
+  function toggleSection(songId: string, idx: number) {
+    setSelected(prev => {
+      const cur = new Set(prev[songId] ?? [])
+      if (cur.has(idx)) cur.delete(idx)
+      else cur.add(idx)
+      return { ...prev, [songId]: cur }
+    })
+  }
+
+  function toggleAll(songId: string) {
+    const total = lyricsBySong?.[songId]?.sections.length ?? 0
+    setSelected(prev => {
+      const cur = prev[songId] ?? new Set<number>()
+      const all = cur.size === total
+      return { ...prev, [songId]: all ? new Set<number>() : new Set(Array.from({ length: total }, (_, i) => i)) }
+    })
+  }
 
   const uniformKey = useMemo(() => {
     const keys = songs.map(s => (s.scale ?? '').trim()).filter(Boolean)
@@ -61,10 +169,41 @@ export default function ShareSetlist({ serviceDate, dayOfWeek, songs, playlistUr
       lines.push('')
       lines.push(`Playlist link: ${playlistUrl}`)
     }
+    if (includeLyrics && lyricsBySong) {
+      const blocks: string[] = []
+      for (const s of songs) {
+        const info = lyricsBySong[s.id]
+        const sel = selected[s.id]
+        if (!info || !sel || sel.size === 0) continue
+        const parts: string[] = [`*${s.title}*`]
+        info.sections.forEach((sec, idx) => {
+          if (!sel.has(idx)) return
+          parts.push(`_${sec.label}:_`)
+          parts.push(sec.lyrics)
+          parts.push('')
+        })
+        blocks.push(parts.join('\n').trimEnd())
+      }
+      if (blocks.length > 0) {
+        lines.push('')
+        lines.push('— Lyrics —')
+        lines.push('')
+        lines.push(blocks.join('\n\n'))
+      }
+    }
     return lines.join('\n')
-  }, [songs, notes, uniformKey, includePlaylist, playlistUrl, serviceDate, dayOfWeek])
+  }, [songs, notes, uniformKey, includePlaylist, playlistUrl, includeLyrics, lyricsBySong, selected, serviceDate, dayOfWeek])
+
+  async function copyMessage() {
+    try {
+      await navigator.clipboard.writeText(message)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard unavailable */ }
+  }
 
   if (songs.length === 0) return null
+  const veryLong = message.length > 6000
 
   return (
     <div>
@@ -106,30 +245,117 @@ export default function ShareSetlist({ serviceDate, dayOfWeek, songs, playlistUr
           ))}
 
           {playlistUrl && (
-            <label className="flex items-center gap-2 text-xs text-zinc-400 select-none">
-              <input
-                type="checkbox"
-                checked={includePlaylist}
-                onChange={e => setIncludePlaylist(e.target.checked)}
-                className="accent-green-600 w-4 h-4"
-              />
-              Include the YouTube practice playlist link
-            </label>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-2 text-xs text-zinc-400 select-none">
+                <input
+                  type="checkbox"
+                  checked={includePlaylist}
+                  onChange={e => setIncludePlaylist(e.target.checked)}
+                  className="accent-green-600 w-4 h-4"
+                />
+                Include the YouTube practice playlist link
+              </label>
+              <a
+                href={playlistUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-auto shrink-0 text-[11px] text-green-500 underline underline-offset-2"
+              >
+                View playlist ↗
+              </a>
+            </div>
+          )}
+
+          <label className="flex items-center gap-2 text-xs text-zinc-400 select-none">
+            <input
+              type="checkbox"
+              checked={includeLyrics}
+              onChange={e => setIncludeLyrics(e.target.checked)}
+              className="accent-green-600 w-4 h-4"
+            />
+            Include song lyrics (pick the sections below)
+          </label>
+
+          {includeLyrics && (
+            <div className="space-y-3 rounded-xl border border-zinc-800/70 p-3">
+              {loadingLyrics && <p className="text-xs text-zinc-500">Loading lyrics…</p>}
+              {!loadingLyrics && lyricsBySong && songs.map(s => {
+                const info = lyricsBySong[s.id]
+                if (!info) {
+                  return (
+                    <div key={s.id}>
+                      <p className="text-xs font-semibold text-zinc-500">{s.title}</p>
+                      <p className="text-[11px] text-zinc-600">No chord sheet yet — no lyrics available</p>
+                    </div>
+                  )
+                }
+                const sel = selected[s.id] ?? new Set<number>()
+                return (
+                  <div key={s.id}>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <p className="text-xs font-semibold text-zinc-300 flex-1 min-w-0 truncate">{s.title}</p>
+                      <button onClick={() => copySongLyrics(s.id, s.title)}
+                        className={`shrink-0 rounded-lg px-2 py-0.5 text-[10px] font-semibold border transition-colors ${
+                          copiedSongId === s.id
+                            ? 'border-green-700 text-green-400'
+                            : 'border-zinc-700 text-zinc-400'
+                        }`}
+                        title="Copy lyrics — selected sections, or the whole song if none selected">
+                        {copiedSongId === s.id ? 'Copied ✓' : sel.size > 0 ? `Copy (${sel.size})` : 'Copy all'}
+                      </button>
+                      <button onClick={() => toggleAll(s.id)}
+                        className="shrink-0 text-[10px] text-zinc-500 underline underline-offset-2">
+                        {sel.size === info.sections.length ? 'none' : 'all'}
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {info.sections.map((sec, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => toggleSection(s.id, idx)}
+                          className={`rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                            sel.has(idx)
+                              ? 'bg-green-600 text-white'
+                              : 'bg-zinc-900 border border-zinc-700 text-zinc-400'
+                          }`}
+                        >
+                          {sec.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           )}
 
           {/* Live preview so what you send is never a surprise */}
-          <pre className="whitespace-pre-wrap rounded-xl bg-black border border-zinc-800 p-3 text-[11px] leading-relaxed text-zinc-300 font-sans">
+          <pre className="whitespace-pre-wrap max-h-64 overflow-y-auto rounded-xl bg-black border border-zinc-800 p-3 text-[11px] leading-relaxed text-zinc-300 font-sans">
             {message}
           </pre>
+          <div className="flex items-center justify-between">
+            <p className={`text-[10px] ${veryLong ? 'text-amber-500' : 'text-zinc-600'}`}>
+              {message.length.toLocaleString()} characters
+              {veryLong ? ' — very long; WhatsApp may truncate a shared link. Use Copy instead.' : ''}
+            </p>
+          </div>
 
-          <a
-            href={`https://wa.me/?text=${encodeURIComponent(message)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block w-full text-center py-3 rounded-xl bg-green-600 text-white text-sm font-semibold active:scale-95 transition-transform"
-          >
-            Share on WhatsApp
-          </a>
+          <div className="flex gap-2">
+            <button
+              onClick={copyMessage}
+              className="px-4 py-3 rounded-xl bg-zinc-800 text-zinc-200 text-sm font-semibold active:scale-95 transition-transform"
+            >
+              {copied ? 'Copied ✓' : 'Copy'}
+            </button>
+            <a
+              href={`https://wa.me/?text=${encodeURIComponent(message)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 block text-center py-3 rounded-xl bg-green-600 text-white text-sm font-semibold active:scale-95 transition-transform"
+            >
+              Share on WhatsApp
+            </a>
+          </div>
         </div>
       )}
     </div>

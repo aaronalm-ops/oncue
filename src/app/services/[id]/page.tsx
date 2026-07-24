@@ -192,7 +192,12 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
         <ShareSetlist
           serviceDate={service.service_date}
           dayOfWeek={service.day_of_week}
-          songs={songs.map(s => ({ id: s.id, title: s.title, scale: s.scale }))}
+          songs={songs.map(s => ({
+            id: s.id,
+            title: s.title,
+            scale: s.scale,
+            librarySongId: (chordsBySongId[s.id] as { librarySongId?: string } | undefined)?.librarySongId ?? null,
+          }))}
           playlistUrl={playlist.url}
         />
 
