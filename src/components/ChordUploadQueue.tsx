@@ -90,6 +90,42 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
     }
   }, [attachIntent])
 
+  const [pasteBusy, setPasteBusy] = useState(false)
+
+  /** No PDF? Paste-first path: create/match the library song, start an empty
+   *  version, link it to the service song, and go straight to the editor. */
+  async function pasteInstead() {
+    if (!attachIntent || attachDoneRef.current || pasteBusy) return
+    setPasteBusy(true)
+    try {
+      const { createClient: createBrowserClient } = await import('@/lib/supabase/client')
+      const supabase = createBrowserClient()
+      const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+      const { data: libs } = await supabase.from('library_songs').select('id, title')
+      let libId = (libs ?? []).find(ls => norm(ls.title) === norm(attachIntent.title))?.id ?? null
+      if (!libId) {
+        const { data: created, error } = await supabase
+          .from('library_songs').insert({ title: attachIntent.title }).select('id').single()
+        if (error || !created) { console.error('create song failed', error?.message); return }
+        libId = created.id
+      }
+      const { data: ver, error: vErr } = await supabase
+        .from('song_versions')
+        .insert({ library_song_id: libId, label: 'Pasted', content_chordpro: '' })
+        .select('id')
+        .single()
+      if (vErr || !ver) { console.error('create version failed', vErr?.message); return }
+      attachDoneRef.current = true
+      await supabase.from('song_links').upsert(
+        { song_id: attachIntent.songId, library_song_id: libId },
+        { onConflict: 'song_id', ignoreDuplicates: false },
+      )
+      router.push(`/library/${libId}/version/${ver.id}`)
+    } finally {
+      setPasteBusy(false)
+    }
+  }
+
   function patchCard(id: string, patch: Partial<CardState>) {
     setCards(prev => prev.map(c => (c.upload.id === id ? { ...c, ...patch } : c)))
   }
@@ -208,6 +244,13 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
             Adding chords for <span className="font-semibold">&ldquo;{attachIntent.title}&rdquo;</span> —
             upload its PDF, confirm, then approve. It links back to the service automatically.
           </p>
+          <button
+            onClick={pasteInstead}
+            disabled={pasteBusy}
+            className="shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold bg-purple-600 text-white disabled:opacity-50"
+          >
+            {pasteBusy ? 'Opening…' : 'Paste chords instead'}
+          </button>
           <button
             onClick={() => router.replace('/library')}
             className="shrink-0 text-[11px] text-purple-300 underline underline-offset-2"

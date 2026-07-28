@@ -64,6 +64,22 @@ export default function SongDetailClient({ song, versions, canManage, userId, pe
     }
   }
 
+  const [pasteBusy, setPasteBusy] = useState(false)
+  async function startPastedVersion() {
+    if (pasteBusy) return
+    setPasteBusy(true)
+    const { createClient: createBrowserClient } = await import('@/lib/supabase/client')
+    const supabase = createBrowserClient()
+    const { data: ver, error } = await supabase
+      .from('song_versions')
+      .insert({ library_song_id: song.id, label: 'Pasted', content_chordpro: '' })
+      .select('id')
+      .single()
+    setPasteBusy(false)
+    if (error || !ver) { console.error('create version failed', error?.message); return }
+    router.push(`/library/${song.id}/version/${ver.id}`)
+  }
+
   async function saveMeta() {
     if (!metaTitle.trim()) { setMetaError('Title cannot be empty'); return }
     setSavingMeta(true)
@@ -170,9 +186,18 @@ export default function SongDetailClient({ song, versions, canManage, userId, pe
             <div className="py-12 text-center">
               <p className="text-zinc-600 text-sm">No chords yet for this song.</p>
               {canManage && (
-                <Link href="/library" className="mt-2 inline-block text-purple-400 text-sm">
-                  Upload a PDF from the library page →
-                </Link>
+                <div className="mt-3 flex items-center justify-center gap-3">
+                  <button
+                    onClick={startPastedVersion}
+                    disabled={pasteBusy}
+                    className="rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 active:scale-95 transition-transform"
+                  >
+                    {pasteBusy ? 'Opening…' : 'Paste chords'}
+                  </button>
+                  <Link href="/library" className="text-purple-400 text-sm">
+                    or upload a PDF →
+                  </Link>
+                </div>
               )}
             </div>
           )}
