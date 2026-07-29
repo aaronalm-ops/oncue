@@ -15,3 +15,10 @@ body {
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Visual metronome: sharp attack, quick decay — one flash per beat */
+@keyframes oncue-beat {
+  0% { opacity: 0.85; }
+  35% { opacity: 0; }
+  100% { opacity: 0; }
+}

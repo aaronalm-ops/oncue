@@ -146,7 +146,17 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   // Persist stage-contrast preference across sessions
   useEffect(() => {
     setHighContrast(localStorage.getItem('oncue-stage') === '1')
+    setPulseOn(localStorage.getItem('oncue-pulse') === '1')
   }, [])
+
+  // Visual metronome (drummer's pulse) — per-device opt-in
+  const [pulseOn, setPulseOn] = useState(false)
+  function togglePulse() {
+    setPulseOn(p => {
+      localStorage.setItem('oncue-pulse', p ? '0' : '1')
+      return !p
+    })
+  }
   function toggleContrast() {
     setHighContrast(h => {
       localStorage.setItem('oncue-stage', h ? '0' : '1')
@@ -331,6 +341,8 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     )
   }
 
+  const currentBpm = currentSong ? chordsBySongId[currentSong.id]?.tempoBpm ?? null : null
+
   const myInstruction = currentSection?.instructions.find(i => i.instrument === viewInstrument)
   const isMyIntro = myInstruction?.is_intro ?? false
   const nextSectionLabel = nextFlat ? songs[nextFlat.songIdx].sections[nextFlat.sectionIdx]?.label : null
@@ -474,15 +486,37 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           {isMyIntro && (
             <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0">YOUR INTRO</span>
           )}
+          {currentBpm !== null && (
+            <button
+              onClick={togglePulse}
+              className={`ml-auto shrink-0 flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold transition-colors ${
+                pulseOn
+                  ? 'bg-amber-600 text-white'
+                  : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
+              }`}
+              title="Pulse your card at the song's tempo"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${pulseOn ? 'bg-white' : 'bg-amber-500'}`}
+                style={pulseOn ? { animation: `oncue-beat ${60 / currentBpm}s linear infinite` } : undefined} />
+              {currentBpm} bpm
+            </button>
+          )}
         </div>
 
         {viewInstrument && (
-          <div className={`rounded-2xl px-4 py-3.5 ${isMyIntro
+          <div className={`relative overflow-hidden rounded-2xl px-4 py-3.5 ${isMyIntro
             ? (hc ? 'border-2 border-orange-500 bg-orange-50' : 'border-2 border-orange-500 bg-zinc-900')
             : cardBg
           }`}>
-            <p className={`text-[10px] font-semibold uppercase tracking-widest mb-1.5 ${dim}`}>{viewInstrument}</p>
-            <p className={`text-base font-semibold leading-snug ${fg}`}>{myInstruction?.text || '—'}</p>
+            {pulseOn && currentBpm !== null && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 rounded-2xl bg-amber-500/60"
+                style={{ animation: `oncue-beat ${60 / currentBpm}s linear infinite` }}
+              />
+            )}
+            <p className={`relative text-[10px] font-semibold uppercase tracking-widest mb-1.5 ${dim}`}>{viewInstrument}</p>
+            <p className={`relative text-base font-semibold leading-snug ${fg}`}>{myInstruction?.text || '—'}</p>
           </div>
         )}
 
