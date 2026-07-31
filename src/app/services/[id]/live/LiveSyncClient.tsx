@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import ChordsPane from '@/components/ChordsPane'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
+import PulsePrompt from '@/components/PulsePrompt'
+import { usePulsePref } from '@/lib/use-pulse'
 import type { SongChordsData } from '@/lib/chords/service-chords'
 
 interface ImpromptuShare {
@@ -146,17 +148,10 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   // Persist stage-contrast preference across sessions
   useEffect(() => {
     setHighContrast(localStorage.getItem('oncue-stage') === '1')
-    setPulseOn(localStorage.getItem('oncue-pulse') === '1')
   }, [])
 
-  // Visual metronome (drummer's pulse) — per-device opt-in
-  const [pulseOn, setPulseOn] = useState(false)
-  function togglePulse() {
-    setPulseOn(p => {
-      localStorage.setItem('oncue-pulse', p ? '0' : '1')
-      return !p
-    })
-  }
+  // Visual metronome — shared, on-by-default preference (see use-pulse)
+  const { pulseOn, pulsePrompt, togglePulse, answerPulsePrompt } = usePulsePref()
   function toggleContrast() {
     setHighContrast(h => {
       localStorage.setItem('oncue-stage', h ? '0' : '1')
@@ -502,6 +497,11 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
             </button>
           )}
         </div>
+
+        {/* One-time ask: pulse defaults on — keep or turn off (per device) */}
+        {pulsePrompt && currentBpm !== null && (
+          <PulsePrompt hc={hc} onAnswer={answerPulsePrompt} />
+        )}
 
         {viewInstrument && (
           <div className={`relative overflow-hidden rounded-2xl px-4 py-3.5 ${isMyIntro

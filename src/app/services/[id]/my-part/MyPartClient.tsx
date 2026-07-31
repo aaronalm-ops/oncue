@@ -4,6 +4,8 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import ChordsPane from '@/components/ChordsPane'
+import PulsePrompt from '@/components/PulsePrompt'
+import { usePulsePref } from '@/lib/use-pulse'
 import type { SongChordsData } from '@/lib/chords/service-chords'
 
 interface Instruction { id: string; instrument: string; text: string; is_intro: boolean }
@@ -34,7 +36,7 @@ function NoteEditor({ initialValue, onSave, onCancel, hc, saving }: {
 }) {
   const [draft, setDraft] = useState(initialValue)
   return (
-    <div className="mt-2 space-y-1.5">
+    <div className="relative mt-2 space-y-1.5">
       <textarea
         className={`w-full rounded-lg px-3 py-2 text-xs resize-none focus:outline-none ${
           hc ? 'bg-white border border-zinc-400 text-black' : 'bg-zinc-800 text-white border border-zinc-700'
@@ -58,7 +60,7 @@ function NoteEditor({ initialValue, onSave, onCancel, hc, saving }: {
 }
 
 function SectionCard({ section, viewInstrument, hc, fg, dim, cardBg, note, isEditing, noteExpanded,
-  saving, onToggleNote, onStartEdit, onSaveNote, onCancelEdit }: {
+  saving, onToggleNote, onStartEdit, onSaveNote, onCancelEdit, pulseBpm = null }: {
   section: Section
   viewInstrument: string
   hc: boolean; fg: string; dim: string; cardBg: string
@@ -70,22 +72,30 @@ function SectionCard({ section, viewInstrument, hc, fg, dim, cardBg, note, isEdi
   onStartEdit: () => void
   onSaveNote: (text: string) => void
   onCancelEdit: () => void
+  pulseBpm?: number | null // when set, the card flashes at this bpm
 }) {
   const instr = section.instructions.find(i => i.instrument === viewInstrument)
 
   return (
-    <div className={`rounded-xl px-4 py-3 ${cardBg} ${instr?.is_intro ? 'border-2 border-orange-500' : ''}`}>
-      <div className="flex items-center gap-2 mb-1.5">
+    <div className={`relative overflow-hidden rounded-xl px-4 py-3 ${cardBg} ${instr?.is_intro ? 'border-2 border-orange-500' : ''}`}>
+      {pulseBpm !== null && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-amber-500/60"
+          style={{ animation: `oncue-beat ${60 / pulseBpm}s linear infinite` }}
+        />
+      )}
+      <div className="relative flex items-center gap-2 mb-1.5">
         <span className={`text-sm font-bold uppercase tracking-wide ${fg}`}>{section.label}</span>
         {instr?.is_intro && (
           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-500 text-white">INTRO</span>
         )}
       </div>
 
-      <p className={`text-sm leading-snug ${fg}`}>{instr?.text || <span className={dim}>—</span>}</p>
+      <p className={`relative text-sm leading-snug ${fg}`}>{instr?.text || <span className={dim}>—</span>}</p>
 
       {section.comments && (
-        <div className="mt-2">
+        <div className="relative mt-2">
           <button onClick={onToggleNote}
             className={`flex items-center gap-1 text-[10px] font-medium ${dim}`}>
             <svg className={`w-3 h-3 transition-transform ${noteExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -110,7 +120,7 @@ function SectionCard({ section, viewInstrument, hc, fg, dim, cardBg, note, isEdi
       ) : (
         <button
           onClick={onStartEdit}
-          className={`mt-2 text-[10px] flex items-center gap-1 ${note ? (hc ? 'text-zinc-700' : 'text-zinc-300') : dim}`}
+          className={`relative mt-2 text-[10px] flex items-center gap-1 ${note ? (hc ? 'text-zinc-700' : 'text-zinc-300') : dim}`}
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -131,6 +141,7 @@ function TempoChip({ tempo, canEdit, onSave, hc, dim }: {
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
+  const taps = useRef<number[]>([])
 
   function commit() {
     const n = parseInt(draft, 10)
@@ -138,21 +149,48 @@ function TempoChip({ tempo, canEdit, onSave, hc, dim }: {
     setEditing(false)
   }
 
+  /** Real tap tempo: tap the beat, we measure it. pointerdown (not click) so
+   *  it registers instantly and never focuses/opens the keyboard. Gap > 2s
+   *  starts a fresh measurement; last 8 intervals are averaged. */
+  function tapBeat(e: React.PointerEvent) {
+    e.preventDefault()
+    const now = performance.now()
+    if (taps.current.length > 0 && now - taps.current[taps.current.length - 1] > 2000) {
+      taps.current = []
+    }
+    taps.current.push(now)
+    if (taps.current.length > 9) taps.current.shift()
+    if (taps.current.length >= 2) {
+      const t = taps.current
+      const avg = (t[t.length - 1] - t[0]) / (t.length - 1)
+      const bpm = Math.min(300, Math.max(30, Math.round(60000 / avg)))
+      setDraft(String(bpm))
+    }
+  }
+
   if (editing) {
     return (
       <span className="flex items-center gap-1 shrink-0">
+        <button
+          onPointerDown={tapBeat}
+          className="rounded-lg px-2.5 py-0.5 text-xs font-bold bg-amber-600 text-white select-none touch-none active:scale-90 active:bg-amber-500 transition-transform"
+        >
+          ♩ Tap
+        </button>
         <input
           value={draft}
           onChange={e => setDraft(e.target.value.replace(/\D/g, '').slice(0, 3))}
           onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
-          onBlur={commit}
-          autoFocus
           inputMode="numeric"
-          placeholder="bpm"
-          className={`w-14 rounded-lg px-1.5 py-0.5 text-xs text-center focus:outline-none border ${
+          placeholder="tap beat"
+          className={`w-16 rounded-lg px-1.5 py-0.5 text-xs text-center focus:outline-none border ${
             hc ? 'bg-white border-zinc-400 text-black' : 'bg-zinc-800 border-purple-600 text-white'
           }`}
         />
+        <button onClick={commit} aria-label="Save tempo"
+          className="rounded-lg px-1.5 py-0.5 text-xs font-bold bg-purple-600 text-white">✓</button>
+        <button onClick={() => setEditing(false)} aria-label="Cancel"
+          className={`rounded-lg px-1.5 py-0.5 text-xs ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-500'}`}>✕</button>
       </span>
     )
   }
@@ -161,13 +199,13 @@ function TempoChip({ tempo, canEdit, onSave, hc, dim }: {
 
   return (
     <button
-      onClick={() => { if (canEdit) { setDraft(tempo != null ? String(tempo) : ''); setEditing(true) } }}
+      onClick={() => { if (canEdit) { setDraft(tempo != null ? String(tempo) : ''); taps.current = []; setEditing(true) } }}
       className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-lg border transition-colors ${
         tempo != null
           ? (hc ? 'bg-zinc-200 border-zinc-300 text-zinc-700' : 'bg-zinc-800 border-zinc-700 text-zinc-300')
           : `border-dashed ${hc ? 'border-zinc-400 text-zinc-500' : 'border-zinc-700 ' + dim}`
       }`}
-      title={canEdit ? 'Tap to set tempo — saved to this song for everyone' : undefined}
+      title={canEdit ? 'Tap the beat or type a number — saved to this song for everyone' : undefined}
     >
       {tempo != null ? `${tempo} bpm` : '+ bpm'}
     </button>
@@ -175,7 +213,8 @@ function TempoChip({ tempo, canEdit, onSave, hc, dim }: {
 }
 
 function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNote, openNotes,
-  saving, onToggleNote, onStartEdit, onSaveNote, onCancelEdit, compact, tempo, canEditTempo, onSaveTempo }: {
+  saving, onToggleNote, onStartEdit, onSaveNote, onCancelEdit, compact, tempo, canEditTempo, onSaveTempo,
+  pulseOn = false, onTogglePulse }: {
   song: Song
   viewInstrument: string
   hc: boolean; fg: string; dim: string; cardBg: string
@@ -191,7 +230,10 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
   tempo: number | null
   canEditTempo: boolean
   onSaveTempo: (bpm: number | null) => void
+  pulseOn?: boolean
+  onTogglePulse?: () => void
 }) {
+  const pulseBpm = pulseOn && !compact && tempo !== null ? tempo : null
   return (
     <div className={`space-y-2 ${compact ? 'pt-6' : ''}`}>
       <div className="flex items-center gap-2">
@@ -202,6 +244,19 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
           </span>
         )}
         <TempoChip tempo={tempo} canEdit={canEditTempo} onSave={onSaveTempo} hc={hc} dim={dim} />
+        {!compact && tempo !== null && onTogglePulse && (
+          <button
+            onClick={onTogglePulse}
+            className={`shrink-0 flex items-center rounded-lg px-2 py-1 transition-colors ${
+              pulseOn ? 'bg-amber-600' : (hc ? 'bg-zinc-200' : 'bg-zinc-800')
+            }`}
+            aria-label="Pulse cards at the song's tempo"
+            title="Pulse cards at the song's tempo"
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${pulseOn ? 'bg-white' : 'bg-amber-500'}`}
+              style={pulseOn ? { animation: `oncue-beat ${60 / tempo}s linear infinite` } : undefined} />
+          </button>
+        )}
         {song.medley_group && <span className={`text-[10px] ${dim}`}>MEDLEY</span>}
         {song.reference_links[0] && (
           <a href={song.reference_links[0]} target="_blank" rel="noopener noreferrer"
@@ -228,6 +283,7 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
             onStartEdit={() => onStartEdit(key)}
             onSaveNote={(text) => onSaveNote(section.id, text)}
             onCancelEdit={onCancelEdit}
+            pulseBpm={pulseBpm}
           />
         )
       })}
@@ -258,6 +314,9 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   const swipeRef = useRef<HTMLDivElement | null>(null)
 
   const hasAnyChords = songs.some(s => chordsBySongId[s.id])
+
+  // Beat pulse — shared, on-by-default preference (same choice powers Live)
+  const { pulseOn, pulsePrompt, togglePulse, answerPulsePrompt } = usePulsePref()
 
   // Song tempo memory (v14): lives on the library song, shown/edited here
   const [tempos, setTempos] = useState<Record<string, number | null>>(() => {
@@ -607,7 +666,13 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       <div className={hasAnyChords ? 'min-w-full lg:min-w-0 snap-center overflow-y-auto h-full' : 'flex-1 min-h-0 overflow-y-auto'}>
       <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
         {layout === 'song' ? (
-          <SongBlock song={activeSong} {...sharedProps} {...tempoPropsFor(activeSong)} />
+          <>
+            {pulsePrompt && tempoPropsFor(activeSong).tempo !== null && (
+              <PulsePrompt hc={hc} onAnswer={answerPulsePrompt} className="mb-3" />
+            )}
+            <SongBlock song={activeSong} {...sharedProps} {...tempoPropsFor(activeSong)}
+              pulseOn={pulseOn} onTogglePulse={togglePulse} />
+          </>
         ) : (
           <div className="space-y-6">
             {songs.map((song, si) => (
