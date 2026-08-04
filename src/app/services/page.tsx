@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import Logo from '@/components/Logo'
 import UploadButton from '@/components/UploadButton'
 import UserMenu from '@/components/UserMenu'
 import ServicesClient from './ServicesClient'
@@ -47,14 +48,8 @@ export default async function ServicesPage() {
         <div className="flex items-center justify-between mb-8">
           {/* Wordmark = home. On a service day, / jumps straight into today. */}
           <Link href="/" className="flex items-center gap-3 active:opacity-70 transition-opacity" aria-label="Home">
-            <div className="w-9 h-9 bg-zinc-950 rounded-xl border border-purple-900/40 flex flex-col items-center justify-center gap-0.5">
-              <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none">
-                <polygon points="4,3 13,8 4,13" fill="#9333EA" />
-              </svg>
-              <div className="flex gap-0.5 items-center">
-                <div className="w-3.5 h-0.5 bg-purple-600 rounded-full" />
-                <div className="w-2 h-0.5 bg-purple-900 rounded-full" />
-              </div>
+            <div className="w-9 h-9 bg-zinc-950 rounded-xl border border-purple-900/40 flex items-center justify-center">
+              <Logo className="w-6 h-6" />
             </div>
             <h1 className="text-xl font-bold tracking-tight">OnCue</h1>
           </Link>

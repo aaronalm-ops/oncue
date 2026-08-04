@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Logo from '@/components/Logo'
 
 type BeforeInstallPromptEvent = Event & { prompt: () => Promise<void> }
 
@@ -68,14 +69,8 @@ export default function RegisterSW() {
     return (
       <div className="fixed bottom-4 left-4 right-4 z-50 bg-zinc-900 border border-purple-800 rounded-2xl px-4 py-3 shadow-xl shadow-purple-950/40">
         <div className="flex items-start gap-3">
-          <div className="w-9 h-9 bg-zinc-950 rounded-xl border border-purple-900/40 flex flex-col items-center justify-center gap-0.5 shrink-0 mt-0.5">
-            <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none">
-              <polygon points="4,3 13,8 4,13" fill="#9333EA" />
-            </svg>
-            <div className="flex gap-0.5">
-              <div className="w-3.5 h-0.5 bg-purple-600 rounded-full" />
-              <div className="w-2 h-0.5 bg-purple-900 rounded-full" />
-            </div>
+          <div className="w-9 h-9 bg-zinc-950 rounded-xl border border-purple-900/40 flex items-center justify-center shrink-0 mt-0.5">
+            <Logo className="w-6 h-6" />
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-white text-sm font-semibold">Install OnCue</p>
@@ -101,14 +96,8 @@ export default function RegisterSW() {
   if (installEvent) {
     return (
       <div className="fixed bottom-4 left-4 right-4 z-50 bg-zinc-900 border border-purple-800 rounded-2xl px-4 py-3 flex items-center gap-3 shadow-xl shadow-purple-950/40">
-        <div className="w-9 h-9 bg-zinc-950 rounded-xl border border-purple-900/40 flex flex-col items-center justify-center gap-0.5 shrink-0">
-          <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none">
-            <polygon points="4,3 13,8 4,13" fill="#9333EA" />
-          </svg>
-          <div className="flex gap-0.5">
-            <div className="w-3.5 h-0.5 bg-purple-600 rounded-full" />
-            <div className="w-2 h-0.5 bg-purple-900 rounded-full" />
-          </div>
+        <div className="w-9 h-9 bg-zinc-950 rounded-xl border border-purple-900/40 flex items-center justify-center shrink-0">
+          <Logo className="w-6 h-6" />
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-white text-sm font-semibold">Install OnCue</p>
@@ -135,14 +124,8 @@ export default function RegisterSW() {
     return (
       <div className="fixed bottom-4 left-4 right-4 z-50 bg-zinc-900 border border-purple-800 rounded-2xl px-4 py-3 shadow-xl shadow-purple-950/40">
         <div className="flex items-start gap-3">
-          <div className="w-9 h-9 bg-zinc-950 rounded-xl border border-purple-900/40 flex flex-col items-center justify-center gap-0.5 shrink-0 mt-0.5">
-            <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none">
-              <polygon points="4,3 13,8 4,13" fill="#9333EA" />
-            </svg>
-            <div className="flex gap-0.5">
-              <div className="w-3.5 h-0.5 bg-purple-600 rounded-full" />
-              <div className="w-2 h-0.5 bg-purple-900 rounded-full" />
-            </div>
+          <div className="w-9 h-9 bg-zinc-950 rounded-xl border border-purple-900/40 flex items-center justify-center shrink-0 mt-0.5">
+            <Logo className="w-6 h-6" />
           </div>
           <div className="flex-1">
             <p className="text-white text-sm font-semibold">Install OnCue</p>

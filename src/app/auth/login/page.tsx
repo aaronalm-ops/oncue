@@ -1,6 +1,7 @@
 'use client'
 
 import { createClient } from '@/lib/supabase/client'
+import Logo from '@/components/Logo'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,15 +24,8 @@ export default function LoginPage() {
         <div className="flex flex-col items-center gap-4">
           <div className="relative">
             <div className="absolute inset-0 rounded-3xl blur-2xl opacity-40 bg-purple-600 scale-110" />
-            <div className="relative w-20 h-20 bg-zinc-950 rounded-3xl border border-purple-900/50 flex flex-col items-center justify-center gap-1.5 shadow-2xl">
-              <svg viewBox="0 0 32 32" className="w-8 h-8" fill="none">
-                <polygon points="8,6 26,16 8,26" fill="#9333EA" />
-              </svg>
-              <div className="flex gap-1.5 items-center">
-                <div className="w-7 h-1 bg-purple-600 rounded-full" />
-                <div className="w-4 h-1 bg-purple-900 rounded-full" />
-                <div className="w-2.5 h-1 bg-purple-950 rounded-full" />
-              </div>
+            <div className="relative w-20 h-20 bg-zinc-950 rounded-3xl border border-purple-900/50 flex items-center justify-center shadow-2xl">
+              <Logo className="w-14 h-14" />
             </div>
           </div>
 
