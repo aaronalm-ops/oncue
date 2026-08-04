@@ -32,7 +32,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     p_bpm: body.bpm ?? null,
     p_library_song_id: body.library_song_id ?? null,
   })
-  if (rpcErr) return NextResponse.json({ error: rpcErr.message }, { status: 500 })
+  if (rpcErr) {
+    // Shared queue race: if the upload row is gone, another member already
+    // confirmed or discarded it — tell the client distinctly (404, not 500).
+    const { data: still } = await supabase.from('chord_uploads').select('id').eq('id', id).maybeSingle()
+    if (!still) return NextResponse.json({ error: 'Already handled by another member' }, { status: 404 })
+    return NextResponse.json({ error: rpcErr.message }, { status: 500 })
+  }
 
   return NextResponse.json(data)
 }

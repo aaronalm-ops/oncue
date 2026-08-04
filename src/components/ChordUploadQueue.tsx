@@ -25,6 +25,7 @@ interface CardState {
   key: string
   bpm: string
   matchId: string | null // null = create new song
+  matchTouched: boolean // user picked "Adds to" manually — stop auto-selecting
   busy: boolean
   error: string | null
 }
@@ -43,6 +44,7 @@ function toCard(u: PendingUpload, suggestions: MatchSuggestion[]): CardState {
     key: u.draft_key ?? '',
     bpm: u.draft_bpm != null ? String(u.draft_bpm) : '',
     matchId: suggestions.length > 0 ? suggestions[0].id : null,
+    matchTouched: false,
     busy: false,
     error: null,
   }
@@ -71,13 +73,21 @@ export interface AttachIntent {
   title: string // the chart's title for that song (display + prefill hint)
 }
 
-export default function ChordUploadQueue({ initialUploads, librarySongs, attachIntent = null }: Props & { attachIntent?: AttachIntent | null }) {
+export default function ChordUploadQueue({ initialUploads, librarySongs, attachIntent = null, onConfirmed }: Props & {
+  attachIntent?: AttachIntent | null
+  /** Fires when an upload lands in the library — lets the song list update instantly */
+  onConfirmed?: (
+    result: { library_song_id: string; version_id: string | null },
+    meta: { title: string; artist: string | null; key: string | null; label: string },
+  ) => void
+}) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [cards, setCards] = useState<CardState[]>(
     initialUploads.map(u => toCard(u, suggestFor(u.draft_title ?? '', librarySongs)))
   )
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
   const [uploadErrors, setUploadErrors] = useState<string[]>([])
+  const [notices, setNotices] = useState<string[]>([]) // neutral info (not errors)
   const router = useRouter()
   const attachDoneRef = useRef(false)
   const pickerOpenedRef = useRef(false)
@@ -120,7 +130,7 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
         { song_id: attachIntent.songId, library_song_id: libId },
         { onConflict: 'song_id', ignoreDuplicates: false },
       )
-      router.push(`/library/${libId}/version/${ver.id}`)
+      router.push(`/library/${libId}/version/${ver.id}?returnTo=/services/${attachIntent.serviceId}`)
     } finally {
       setPasteBusy(false)
     }
@@ -128,6 +138,21 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
 
   function patchCard(id: string, patch: Partial<CardState>) {
     setCards(prev => prev.map(c => (c.upload.id === id ? { ...c, ...patch } : c)))
+  }
+
+  /** Title edits re-run the duplicate matcher live; the auto-pick follows
+   *  along unless the user chose an "Adds to" target themselves. */
+  function changeTitle(id: string, title: string) {
+    setCards(prev => prev.map(c => {
+      if (c.upload.id !== id) return c
+      const suggestions = suggestFor(title, librarySongs)
+      return {
+        ...c,
+        title,
+        suggestions,
+        matchId: c.matchTouched ? c.matchId : (suggestions[0]?.id ?? null),
+      }
+    }))
   }
 
   async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
@@ -191,10 +216,29 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
     })
     const data = await res.json()
     if (!res.ok) {
+      if (res.status === 404) {
+        // Another member beat us to it — clear the card, no scary red error
+        setCards(prev => prev.filter(c => c.upload.id !== card.upload.id))
+        setNotices(prev => [...prev, `"${card.title.trim() || card.upload.original_filename}" was already handled by another member`])
+        return
+      }
       patchCard(card.upload.id, { busy: false, error: data.error ?? 'Failed' })
       return
     }
     setCards(prev => prev.filter(c => c.upload.id !== card.upload.id))
+
+    // Tell the library list right away — the song appears without any reload
+    if (data.library_song_id) {
+      onConfirmed?.(
+        { library_song_id: data.library_song_id, version_id: data.version_id ?? null },
+        {
+          title: card.title.trim(),
+          artist: card.artist.trim() || null,
+          key: card.key.trim() || null,
+          label: card.upload.original_filename,
+        },
+      )
+    }
 
     // Came here from a service song's "add chords"? Link that song to the
     // confirmed library entry, then jump straight to review & approve.
@@ -210,9 +254,17 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
         )
       if (linkErr) console.error('service-song link failed', linkErr.message)
       if (data.version_id) {
-        router.push(`/library/${data.library_song_id}/version/${data.version_id}`)
+        // Approve in the editor returns to the service this came from
+        router.push(`/library/${data.library_song_id}/version/${data.version_id}?returnTo=/services/${attachIntent.serviceId}`)
         return
       }
+    }
+
+    // A scan has no extracted text — the ONLY next step is pasting chords, so
+    // take the user straight to the editor instead of leaving them to hunt.
+    if (card.upload.status === 'scan' && data.library_song_id && data.version_id) {
+      router.push(`/library/${data.library_song_id}/version/${data.version_id}`)
+      return
     }
     router.refresh()
   }
@@ -220,8 +272,10 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
   async function discard(card: CardState) {
     patchCard(card.upload.id, { busy: true, error: null })
     const res = await fetch(`/api/library/uploads/${card.upload.id}`, { method: 'DELETE' })
-    if (res.ok) setCards(prev => prev.filter(c => c.upload.id !== card.upload.id))
-    else {
+    if (res.ok || res.status === 404) {
+      // 404 = someone else already confirmed/discarded it — same outcome
+      setCards(prev => prev.filter(c => c.upload.id !== card.upload.id))
+    } else {
       const data = await res.json()
       patchCard(card.upload.id, { busy: false, error: data.error ?? 'Failed to discard' })
     }
@@ -281,7 +335,7 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
         {cards.length > 1 && cleanCount > 1 && !uploading && (
           <button onClick={confirmAllClean}
             className="px-3 py-1.5 rounded-xl bg-purple-600 text-white text-sm font-semibold active:scale-95 transition-transform">
-            Confirm all ({cleanCount})
+            Add all to library ({cleanCount})
           </button>
         )}
       </div>
@@ -291,11 +345,16 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
           {uploadErrors.map((err, i) => <p key={i} className="text-red-400 text-xs">{err}</p>)}
         </div>
       )}
+      {notices.length > 0 && (
+        <div className="mt-2 space-y-0.5">
+          {notices.map((n, i) => <p key={i} className="text-zinc-400 text-xs">{n}</p>)}
+        </div>
+      )}
 
       {cards.length > 0 && (
         <div className="mt-4 space-y-3">
           <p className="text-xs text-zinc-500 font-medium">
-            {cards.length} upload{cards.length === 1 ? '' : 's'} awaiting confirmation
+            {cards.length} upload{cards.length === 1 ? '' : 's'} ready — check the details below, then add to the library
           </p>
           {cards.map(card => (
             <div key={card.upload.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
@@ -319,7 +378,7 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
               )}
 
               <div className="grid grid-cols-2 gap-2">
-                <input value={card.title} onChange={e => patchCard(card.upload.id, { title: e.target.value })}
+                <input value={card.title} onChange={e => changeTitle(card.upload.id, e.target.value)}
                   placeholder="Title *"
                   className="col-span-2 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-purple-600" />
                 <input value={card.artist} onChange={e => patchCard(card.upload.id, { artist: e.target.value })}
@@ -337,15 +396,24 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
                 <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Adds to</label>
                 <select
                   value={card.matchId ?? ''}
-                  onChange={e => patchCard(card.upload.id, { matchId: e.target.value || null })}
+                  onChange={e => patchCard(card.upload.id, { matchId: e.target.value || null, matchTouched: true })}
                   className="mt-1 w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-600"
                 >
                   <option value="">New song: “{card.title || 'Untitled'}”</option>
-                  {(card.suggestions.length ? card.suggestions : librarySongs).map(s => (
-                    <option key={s.id} value={s.id}>
-                      Existing: {s.title}{s.artist ? ` — ${s.artist}` : ''}
-                    </option>
-                  ))}
+                  {(() => {
+                    const opts = card.suggestions.length ? [...card.suggestions] : [...librarySongs]
+                    // Keep a manually chosen target visible even if fresh
+                    // suggestions no longer include it
+                    if (card.matchId && !opts.some(o => o.id === card.matchId)) {
+                      const sel = librarySongs.find(s => s.id === card.matchId)
+                      if (sel) opts.unshift(sel)
+                    }
+                    return opts.map(s => (
+                      <option key={s.id} value={s.id}>
+                        Existing: {s.title}{s.artist ? ` — ${s.artist}` : ''}
+                      </option>
+                    ))
+                  })()}
                 </select>
                 {card.suggestions.length > 0 && card.matchId === card.suggestions[0].id && (
                   <p className="mt-1 text-[11px] text-purple-400">Matched an existing song — will be added as a new version</p>
@@ -361,7 +429,7 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
                 </button>
                 <button onClick={() => confirm(card)} disabled={card.busy}
                   className="flex-1 py-2 rounded-xl bg-purple-600 text-white text-sm font-semibold disabled:opacity-50 active:scale-95 transition-transform">
-                  {card.busy ? 'Saving…' : card.upload.status === 'scan' ? 'Confirm (paste chords next)' : 'Confirm'}
+                  {card.busy ? 'Saving…' : card.upload.status === 'scan' ? 'Add & paste chords' : 'Add to library'}
                 </button>
               </div>
             </div>

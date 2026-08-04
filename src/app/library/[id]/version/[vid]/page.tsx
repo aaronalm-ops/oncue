@@ -2,8 +2,16 @@ import { redirect, notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import VersionEditorClient from './VersionEditorClient'
 
-export default async function VersionEditorPage({ params }: { params: Promise<{ id: string; vid: string }> }) {
+export default async function VersionEditorPage({ params, searchParams }: {
+  params: Promise<{ id: string; vid: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   const { id, vid } = await params
+  // Where "Approve" should land (e.g. back to the service you came from).
+  // Only same-app paths — anything else falls back to the song page.
+  const sp = await searchParams
+  const rawReturn = Array.isArray(sp.returnTo) ? sp.returnTo[0] : sp.returnTo
+  const returnTo = rawReturn && rawReturn.startsWith('/') && !rawReturn.startsWith('//') ? rawReturn : null
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/auth/login')
@@ -43,6 +51,7 @@ export default async function VersionEditorPage({ params }: { params: Promise<{ 
         content: version.content_chordpro ?? '',
       }}
       pdfUrl={pdfUrl}
+      returnTo={returnTo}
     />
   )
 }

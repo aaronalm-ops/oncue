@@ -101,10 +101,12 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
       <div className="max-w-lg mx-auto px-4 pt-12 pb-24 space-y-8">
 
         <div>
-          <Link href="/services" className="text-zinc-500 text-sm flex items-center gap-1 mb-5 active:text-zinc-300 transition-colors">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
+          <Link href="/services" className="inline-flex items-center gap-2 mb-5 text-zinc-500 text-sm active:text-zinc-300 transition-colors">
+            <span className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+              <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </span>
             All services
           </Link>
 

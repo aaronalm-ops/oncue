@@ -569,7 +569,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       <div className={`min-h-screen ${bg} flex flex-col items-center justify-center gap-4 px-6 text-center`}>
         <p className={`font-semibold ${fg}`}>No songs found in this service.</p>
         <p className={dim + ' text-sm'}>The chart may have been parsed incorrectly. Delete it and re-upload.</p>
-        <a href="/services" className="text-purple-400 text-sm mt-2">← Back to services</a>
+        <Link href={`/services/${serviceId}`} className="text-purple-400 text-sm mt-2">← Back to the service</Link>
       </div>
     )
   }
@@ -594,10 +594,10 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       {/* Running order strip */}
       <div className={`border-b ${borderB} shrink-0 px-3 py-2`}>
         <div className="flex flex-wrap gap-1.5 items-center">
-          <Link href={`/services/${serviceId}`}
+          <Link href={`/services/${serviceId}`} aria-label="Back to service"
             className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </Link>
           {songs.map((song, si) => {

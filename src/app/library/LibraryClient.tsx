@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { AppRole } from '@/lib/types'
@@ -30,6 +30,36 @@ interface Props {
 
 export default function LibraryClient({ songs: initial, role, pendingUploads, attachIntent = null }: Props) {
   const [songs, setSongs] = useState(initial)
+
+  // THE reload bug: state seeded from the prop once meant router.refresh()
+  // re-rendered the server page but this list never updated. Keep them in sync.
+  useEffect(() => { setSongs(initial) }, [initial])
+
+  /** Optimistic list update the moment an upload is added to the library —
+   *  the new/updated song appears instantly (refresh confirms it after). */
+  function handleConfirmed(
+    result: { library_song_id: string; version_id: string | null },
+    meta: { title: string; artist: string | null; key: string | null; label: string },
+  ) {
+    setSongs(prev => {
+      const version = result.version_id
+        ? [{ id: result.version_id, label: meta.label, stored_key: meta.key, reviewed_at: null }]
+        : []
+      const idx = prev.findIndex(s => s.id === result.library_song_id)
+      if (idx >= 0) {
+        const copy = [...prev]
+        copy[idx] = { ...copy[idx], song_versions: [...copy[idx].song_versions, ...version] }
+        return copy
+      }
+      return [...prev, {
+        id: result.library_song_id,
+        title: meta.title,
+        artist: meta.artist,
+        created_at: new Date().toISOString(),
+        song_versions: version,
+      }].sort((a, b) => a.title.localeCompare(b.title))
+    })
+  }
   const [query, setQuery] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [newTitle, setNewTitle] = useState('')
@@ -86,6 +116,11 @@ export default function LibraryClient({ songs: initial, role, pendingUploads, at
     s.title.toLowerCase().includes(query.toLowerCase()) ||
     (s.artist ?? '').toLowerCase().includes(query.toLowerCase())
   )
+
+  // Review queue floats to the top — anyone opening the library sees at a
+  // glance what's waiting. Everything else stays alphabetical below.
+  const needsReview = filtered.filter(s => s.song_versions.some(v => !v.reviewed_at))
+  const restSongs = filtered.filter(s => !s.song_versions.some(v => !v.reviewed_at))
 
   async function addSong() {
     if (!newTitle.trim()) return
@@ -160,6 +195,7 @@ export default function LibraryClient({ songs: initial, role, pendingUploads, at
             initialUploads={pendingUploads}
             librarySongs={songs.map(s => ({ id: s.id, title: s.title, artist: s.artist }))}
             attachIntent={attachIntent}
+            onConfirmed={handleConfirmed}
           />
         )}
 
@@ -191,10 +227,16 @@ export default function LibraryClient({ songs: initial, role, pendingUploads, at
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {filtered.map(song => {
+            {needsReview.length > 0 && (
+              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500 mt-1">
+                Needs review · {needsReview.length}
+              </p>
+            )}
+            {[...needsReview, ...restSongs].map((song, i) => {
               const reviewedCount = song.song_versions.filter(v => v.reviewed_at).length
               const totalVersions = song.song_versions.length
               const isSelected = selected.has(song.id)
+              const firstOfRest = needsReview.length > 0 && i === needsReview.length
               const inner = (
                 <>
                   {selectMode && (
@@ -217,9 +259,11 @@ export default function LibraryClient({ songs: initial, role, pendingUploads, at
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
                         reviewedCount === totalVersions
                           ? 'bg-green-900/40 text-green-400 border border-green-800/40'
-                          : 'bg-zinc-800 text-zinc-400'
+                          : 'bg-amber-900/40 text-amber-400 border border-amber-800/40'
                       }`}>
-                        {reviewedCount === totalVersions ? '✓ Ready' : `${reviewedCount}/${totalVersions} reviewed`}
+                        {reviewedCount === totalVersions
+                          ? '✓ Ready'
+                          : `Needs review${totalVersions > 1 ? ` (${reviewedCount}/${totalVersions})` : ''}`}
                       </span>
                     ) : (
                       <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-950 text-amber-500 border border-amber-900/50">Needs chords</span>
@@ -235,14 +279,24 @@ export default function LibraryClient({ songs: initial, role, pendingUploads, at
               const rowClass = `bg-zinc-900 border rounded-2xl px-4 py-3.5 flex items-center gap-3 transition-colors ${
                 selectMode && isSelected ? 'border-purple-600' : 'border-zinc-800 active:bg-zinc-800'
               }`
-              return selectMode ? (
-                <button key={song.id} onClick={() => toggleSelected(song.id)} className={`${rowClass} text-left w-full`}>
+              const row = selectMode ? (
+                <button onClick={() => toggleSelected(song.id)} className={`${rowClass} text-left w-full`}>
                   {inner}
                 </button>
               ) : (
-                <Link key={song.id} href={`/library/${song.id}`} className={rowClass}>
+                <Link href={`/library/${song.id}`} className={rowClass}>
                   {inner}
                 </Link>
+              )
+              return (
+                <div key={song.id} className="contents">
+                  {firstOfRest && (
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mt-3">
+                      All songs
+                    </p>
+                  )}
+                  {row}
+                </div>
               )
             })}
           </div>

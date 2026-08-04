@@ -17,11 +17,12 @@ interface Props {
     content: string
   }
   pdfUrl: string | null
+  returnTo?: string | null // where Approve lands (e.g. the service you came from)
 }
 
 type Pane = 'edit' | 'preview' | 'pdf'
 
-export default function VersionEditorClient({ songId, songTitle, version, pdfUrl }: Props) {
+export default function VersionEditorClient({ songId, songTitle, version, pdfUrl, returnTo = null }: Props) {
   const draftKey = `oncue-chord-draft:${version.id}`
   const [content, setContent] = useState(version.content)
   const [storedKey, setStoredKey] = useState(version.stored_key ?? '')
@@ -110,7 +111,7 @@ export default function VersionEditorClient({ songId, songTitle, version, pdfUrl
     }
     setDirty(false)
     try { localStorage.removeItem(draftKey) } catch { /* noop */ }
-    router.push(`/library/${songId}`)
+    router.push(returnTo ?? `/library/${songId}`)
       }
 
   const panes: { id: Pane; label: string; show: boolean }[] = [
