@@ -9,7 +9,7 @@ import { usePulsePref } from '@/lib/use-pulse'
 import type { SongChordsData } from '@/lib/chords/service-chords'
 
 interface Instruction { id: string; instrument: string; text: string; is_intro: boolean }
-interface Section { id: string; order_index: number; label: string; comments: string; instructions: Instruction[] }
+interface Section { id: string; order_index: number; label: string; comments: string; key_change?: string | null; instructions: Instruction[] }
 interface Song { id: string; order_index: number; title: string; scale: string | null; medley_group: string | null; reference_links: string[]; sections: Section[] }
 interface UserNote { id: string; section_id: string; instrument: string; note_text: string }
 
@@ -89,6 +89,11 @@ function SectionCard({ section, viewInstrument, hc, fg, dim, cardBg, note, isEdi
         <span className={`text-sm font-bold uppercase tracking-wide ${fg}`}>{section.label}</span>
         {instr?.is_intro && (
           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-500 text-white">INTRO</span>
+        )}
+        {section.key_change && (
+          <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-black">
+            KEY → {section.key_change}
+          </span>
         )}
       </div>
 
@@ -234,13 +239,18 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
   onTogglePulse?: () => void
 }) {
   const pulseBpm = pulseOn && !compact && tempo !== null ? tempo : null
+  // Key journey when the song modulates: "G → A" (consecutive dupes collapsed)
+  const keyJourney = song.sections
+    .map(s => s.key_change)
+    .filter((k): k is string => !!k)
+    .filter((k, i, arr) => i === 0 || arr[i - 1] !== k)
   return (
     <div className={`space-y-2 ${compact ? 'pt-6' : ''}`}>
       <div className="flex items-center gap-2">
         <span className={`font-bold text-sm ${fg}`}>{song.title}</span>
         {song.scale && (
           <span className={`text-xs font-black px-2.5 py-0.5 rounded-lg ${hc ? 'bg-black text-white' : 'bg-purple-600 text-white'}`}>
-            {song.scale}
+            {song.scale}{keyJourney.length > 0 ? ` → ${keyJourney.join(' → ')}` : ''}
           </span>
         )}
         <TempoChip tempo={tempo} canEdit={canEditTempo} onSave={onSaveTempo} hc={hc} dim={dim} />
@@ -660,10 +670,12 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
         onTouchStart={hasAnyChords ? onPaneTouchStart : undefined}
         onTouchEnd={hasAnyChords ? onPaneTouchEnd : undefined}
         className={`flex-1 min-h-0 ${hasAnyChords
-          ? 'flex overflow-x-auto snap-x snap-mandatory no-scrollbar lg:grid lg:grid-cols-2 lg:overflow-x-hidden'
+          ? 'flex overflow-x-auto snap-x snap-mandatory no-scrollbar sm:grid sm:grid-cols-2 sm:overflow-x-hidden'
           : 'flex flex-col'}`}
       >
-      <div className={hasAnyChords ? 'min-w-full lg:min-w-0 snap-center overflow-y-auto h-full' : 'flex-1 min-h-0 overflow-y-auto'}>
+      {/* sm (640px) not lg: unfolded foldables report ~670–840px CSS width and
+          MUST get both panes live side by side — that's the whole point. */}
+      <div className={hasAnyChords ? 'min-w-full sm:min-w-0 snap-center overflow-y-auto h-full' : 'flex-1 min-h-0 overflow-y-auto'}>
       <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
         {layout === 'song' ? (
           <>
@@ -687,12 +699,13 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
 
       {/* Chords pane */}
       {hasAnyChords && (
-        <div className="min-w-full lg:min-w-0 snap-center overflow-y-auto h-full lg:border-l lg:border-zinc-800">
+        <div className="min-w-full sm:min-w-0 snap-center overflow-y-auto h-full sm:border-l sm:border-zinc-800">
           <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
             <ChordsPane
               key={activeSong.id}
               songTitle={activeSong.title}
               chartLabels={activeSong.sections.map(s => s.label)}
+              chartKeyChanges={activeSong.sections.map(s => s.key_change ?? null)}
               chords={chordsBySongId[activeSong.id] ?? null}
               songScale={activeSong.scale}
               initialKey={
@@ -714,7 +727,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
 
       {/* Part / Chords pane switcher (phones) */}
       {hasAnyChords && (
-        <div className="lg:hidden fixed left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-full border p-0.5 bg-zinc-900/95 border-zinc-700"
+        <div className="sm:hidden fixed left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-full border p-0.5 bg-zinc-900/95 border-zinc-700"
           style={{ bottom: '118px' }}>
           <button onClick={() => scrollToPane(0)}
             className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${

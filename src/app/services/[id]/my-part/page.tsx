@@ -27,7 +27,7 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
     .select(`
       id, order_index, title, scale, medley_group, reference_links, in_chart,
       sections (
-        id, order_index, label, comments,
+        id, order_index, label, comments, key_change,
         instructions ( id, instrument, text, is_intro )
       )
     `)

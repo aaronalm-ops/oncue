@@ -211,6 +211,46 @@ export function transposeBody(body: string, fromKey: string, toKey: string): str
 }
 
 // ============================================================
+// Mid-song key changes (modulation). The chart may mark a section with a
+// key-change (e.g. "LAST CHORUS (KEY A)"). A change persists from that
+// section to the end of the song unless another marker appears.
+// ============================================================
+
+/** Signed semitone distance fromKey → toKey (0..11), or null if unparseable. */
+export function semitonesBetween(fromKey: string | null | undefined, toKey: string | null | undefined): number | null {
+  if (!fromKey || !toKey) return null
+  const a = keyIndex(fromKey)
+  const b = keyIndex(toKey)
+  if (a === null || b === null) return null
+  return ((b - a) % 12 + 12) % 12
+}
+
+/** Key `semitones` above `key`, spelled like the transpose UI (ALL_KEYS). */
+export function keyAtOffset(key: string, semitones: number): string {
+  const idx = keyIndex(key)
+  if (idx === null) return key
+  const minor = /m$/.test(key.trim()) ? 'm' : ''
+  return ALL_KEYS[((idx + semitones) % 12 + 12) % 12] + minor
+}
+
+/**
+ * Resolve each chart section's SOUNDING key from the song's base key and the
+ * sparse per-section markers (null = no marker on that section). A marker
+ * carries forward until the next one. Returns one key per section (null when
+ * no base key is known and no marker has appeared yet).
+ */
+export function effectiveSectionKeys(
+  baseKey: string | null,
+  keyChanges: (string | null)[],
+): (string | null)[] {
+  let current = baseKey && keyIndex(baseKey) !== null ? baseKey : null
+  return keyChanges.map(kc => {
+    if (kc && keyIndex(kc) !== null) current = kc
+    return current
+  })
+}
+
+// ============================================================
 // Instrument-aware transpose hint. The band always sounds in the chart key
 // (`actualKey`); the chords on screen are shown in `targetKey` (the player's
 // preferred/fingering key). This tells each instrument how to bridge the two:
@@ -272,10 +312,27 @@ export interface ReorderResult {
  * word ("verse"). A chord section may be reused when the chart repeats it.
  * Chart labels with no match are skipped (reported), and chord sections never
  * matched are appended at the end under their own headers so nothing is lost.
+ *
+ * `opts.keyChanges` (index-aligned with chartLabels, sparse) applies mid-song
+ * modulations: the affected sections are transposed by the modulation interval
+ * and their headers gain a "· KEY UP n" cue. The cue is RELATIVE on purpose —
+ * it stays true even after the viewer transposes the whole sheet to their own
+ * key (a uniform shift preserves the interval).
  */
-export function reorderBodyToChart(body: string, chartLabels: string[]): ReorderResult {
+export function reorderBodyToChart(
+  body: string,
+  chartLabels: string[],
+  opts?: { keyChanges?: (string | null)[]; storedKey?: string | null; songKey?: string | null },
+): ReorderResult {
   const sections = deriveSections(body)
   if (sections.length === 0) return { body, matched: 0, unmatched: [] }
+
+  // Per-chart-index modulation deltas (semitones above the song's base key)
+  const kcBase = opts?.songKey ?? opts?.storedKey ?? null
+  const effKeys = opts?.keyChanges && kcBase && keyIndex(kcBase) !== null
+    ? effectiveSectionKeys(kcBase, opts.keyChanges)
+    : null
+  const canShift = opts?.storedKey != null && keyIndex(opts.storedKey) !== null
 
   const byFull = new Map<string, DerivedSection[]>()
   const byBase = new Map<string, DerivedSection[]>()
@@ -293,10 +350,18 @@ export function reorderBodyToChart(body: string, chartLabels: string[]): Reorder
   // Per-label cursor so "VERSE, VERSE" walks Verse 1 → Verse 2, then wraps.
   const cursors = new Map<string, number>()
 
-  for (const chartLabel of chartLabels) {
+  for (let ci = 0; ci < chartLabels.length; ci++) {
+    const chartLabel = chartLabels[ci]
     const full = normalizeSectionLabelFull(chartLabel)
     const base = normalizeSectionLabel(chartLabel)
     const pool = byFull.get(full)?.length ? byFull.get(full)! : (byBase.get(base) ?? [])
+
+    // Modulation delta for this chart position (0 = still in the base key)
+    const delta = effKeys ? (semitonesBetween(kcBase, effKeys[ci] ?? kcBase) ?? 0) : 0
+    const shifting = delta !== 0 && canShift
+    const signed = delta > 6 ? delta - 12 : delta
+    const keyCue = shifting ? ` · KEY ${signed > 0 ? 'UP' : 'DOWN'} ${Math.abs(signed)}` : ''
+
     if (pool.length === 0) {
       unmatched.push(chartLabel)
       continue
@@ -308,8 +373,12 @@ export function reorderBodyToChart(body: string, chartLabels: string[]): Reorder
     used.add(section.order_index)
     matched++
     // Keep the CHART's label (the conductor's wording) as the header
-    out.push(`# ${chartLabel}`)
-    if (section.content) out.push(section.content)
+    out.push(`# ${chartLabel}${keyCue}`)
+    if (section.content) {
+      out.push(shifting
+        ? transposeBody(section.content, opts!.storedKey!, keyAtOffset(opts!.storedKey!, delta))
+        : section.content)
+    }
     out.push('')
   }
 

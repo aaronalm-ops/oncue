@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import ChordSheet from '@/components/ChordSheet'
-import { ALL_KEYS, deriveSections, keyIndex, mapChartSectionsToChords, normalizeSectionLabelFull, transposeBody, transposeHint } from '@/lib/chords/format'
+import { ALL_KEYS, deriveSections, effectiveSectionKeys, keyAtOffset, keyIndex, mapChartSectionsToChords, normalizeSectionLabelFull, semitonesBetween, transposeBody, transposeHint } from '@/lib/chords/format'
 import type { SongChordsData } from '@/lib/chords/service-chords'
 
 interface Props {
@@ -18,6 +18,7 @@ interface Props {
   canMapSections?: boolean // editors: allow mapping unmatched chart sections
   instrument?: string | null // for the capo / keyboard-transpose hint
   preferredKey?: string | null // global default key; null = actual, no transpose
+  chartKeyChanges?: (string | null)[] // index-aligned with chartLabels: mid-song modulations
 }
 
 /**
@@ -26,7 +27,7 @@ interface Props {
  * live section is highlighted and kept in view, and the key strip transposes
  * with the user's per-song preference saved — same behaviour everywhere.
  */
-export default function ChordsPane({ songTitle, chartLabels, chords, songScale, initialKey, userId, currentSectionIdx, highContrast, canMapSections = false, instrument = null, preferredKey = null }: Props) {
+export default function ChordsPane({ songTitle, chartLabels, chords, songScale, initialKey, userId, currentSectionIdx, highContrast, canMapSections = false, instrument = null, preferredKey = null, chartKeyChanges }: Props) {
   const hc = highContrast
   const storedKey = chords?.storedKey ?? null
   const canTranspose = storedKey !== null && keyIndex(storedKey) !== null
@@ -88,6 +89,21 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
     const active = canTranspose && targetKey && targetKey !== storedKey
     return (content: string) => (active ? transposeBody(content, storedKey!, targetKey) : content)
   }, [canTranspose, targetKey, storedKey])
+
+  // Mid-song modulations: each chart section's SOUNDING key (marker persists
+  // forward), from which we derive a per-section semitone delta on top of the
+  // user's own transpose — the modulation interval is preserved in any key.
+  const kcBase = songScale ?? storedKey
+  const effKeys = useMemo(
+    () => (chartKeyChanges && kcBase && keyIndex(kcBase) !== null
+      ? effectiveSectionKeys(kcBase, chartKeyChanges)
+      : null),
+    [chartKeyChanges, kcBase],
+  )
+  function modDeltaAt(i: number): number {
+    if (!effKeys) return 0
+    return semitonesBetween(kcBase, effKeys[i] ?? kcBase) ?? 0
+  }
 
   // Follow the live position — scroll ONLY the vertical pane. scrollIntoView
   // pans every scrollable ancestor, including the horizontal snap container,
@@ -161,6 +177,13 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
       <div className="space-y-2">
         {mapped!.sections.map((sec, i) => {
           const isCurrent = currentSectionIdx === i
+          const modDelta = modDeltaAt(i)
+          const modMarkerHere = chartKeyChanges?.[i] ?? null // change happens AT this section
+          const modSigned = modDelta > 6 ? modDelta - 12 : modDelta
+          // What this section sounds/reads as, in the user's current view key
+          const modShownKey = modDelta !== 0 && canTranspose
+            ? keyAtOffset(shownKey ?? storedKey!, modDelta)
+            : modMarkerHere
           return (
             <div
               key={i}
@@ -171,13 +194,24 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
                   : (hc ? 'border-zinc-200 bg-zinc-100' : 'border-zinc-800/60 bg-zinc-950')
               }`}
             >
-              <p className={`text-[10px] font-bold uppercase tracking-widest mb-1 ${
-                isCurrent ? 'text-purple-400' : (hc ? 'text-zinc-600' : 'text-zinc-500')
-              }`}>
-                {sec.label}
-              </p>
+              <div className="flex items-center gap-1.5 mb-1">
+                <p className={`text-[10px] font-bold uppercase tracking-widest ${
+                  isCurrent ? 'text-purple-400' : (hc ? 'text-zinc-600' : 'text-zinc-500')
+                }`}>
+                  {sec.label}
+                </p>
+                {modMarkerHere && (
+                  <span className="shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-black">
+                    {modSigned < 0 ? '↓' : '↑'} KEY {modShownKey}
+                  </span>
+                )}
+              </div>
               {sec.content ? (
-                <ChordSheet body={transpose(sec.content)} highContrast={hc} compact />
+                <ChordSheet
+                  body={modDelta !== 0 && canTranspose
+                    ? transposeBody(sec.content, storedKey!, keyAtOffset(shownKey ?? storedKey!, modDelta))
+                    : transpose(sec.content)}
+                  highContrast={hc} compact />
               ) : canMapSections && chordSectionLabels.length > 0 ? (
                 <select
                   defaultValue=""

@@ -218,6 +218,27 @@ async function main() {
   check(m2.sections[0].content === 'B-line', 'override maps chart label to the chosen sheet section')
   check(m2.sections[0].label === 'INSTRUMENTAL SOLO', 'chart wording stays as the header')
 
+  // ---- Mid-song key changes (modulation) ----
+  console.log('\nmodulation')
+  const { effectiveSectionKeys, keyAtOffset, semitonesBetween } = await import('../src/lib/chords/format')
+  check(semitonesBetween('G', 'A') === 2, 'G→A is 2 semitones')
+  check(keyAtOffset('G', 2) === 'A' && keyAtOffset('A', 10) === 'G', 'keyAtOffset up/wraps correctly')
+  const eff = effectiveSectionKeys('G', [null, null, 'A', null, 'G', null])
+  check(
+    JSON.stringify(eff) === JSON.stringify(['G', 'G', 'A', 'A', 'G', 'G']),
+    'markers persist forward until the next marker'
+  )
+  const modBody = '# Verse\n[G]Down [C]here\n\n# Chorus\n[G]Up [D]high'
+  const rm = reorderBodyToChart(modBody, ['VERSE', 'CHORUS', 'CHORUS'], {
+    keyChanges: [null, null, 'A'],
+    storedKey: 'G',
+    songKey: 'G',
+  })
+  check(rm.body.includes('[G]Down'), 'pre-modulation section untouched')
+  check(rm.body.includes('# CHORUS · KEY UP 2'), 'modulated header carries a relative cue')
+  check(rm.body.includes('[A]Up [E]high'), 'modulated section transposed by the interval')
+  check(rm.body.includes('[G]Up [D]high'), 'earlier repeat of the same section stays in base key')
+
   console.log(failures === 0 ? '\nAll chord checks passed.' : `\n${failures} chord check(s) FAILED.`)
   process.exit(failures === 0 ? 0 : 1)
 }

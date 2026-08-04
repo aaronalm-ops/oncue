@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import { keyAtOffset, keyIndex } from './chords/format'
 
 const INTRO_ORANGE = 'FFFF9900'
 // Filename formats: "THURSDAY 28-05-2026 CHART.xlsx" or "THURSDAY_28-05-2026_CHART.xlsx"
@@ -14,6 +15,7 @@ export interface ParsedSection {
   order_index: number
   label: string
   comments: string
+  key_change: string | null // mid-song modulation: sounding key FROM this section on
   instructions: ParsedInstruction[]
 }
 
@@ -57,6 +59,79 @@ function cellText(value: ExcelJS.CellValue): string {
 function extractUrls(text: string): string[] {
   const matches = text.match(/https?:\/\/[^\s"'<>]+/g) ?? []
   return matches.filter(u => u.includes('youtube') || u.includes('youtu.be'))
+}
+
+// ============================================================
+// Mid-song key change ("transpose mid song"). The conductor marks it on the
+// section row where the modulation happens, in the STRUCTURE cell (preferred)
+// or the COMMENTS cell:
+//
+//   LAST CHORUS (KEY A)      absolute — the word KEY + the new key
+//   CHORUS - KEY OF Bb       KEY OF / KEY TO / NEW KEY / KEY CHANGE all work
+//   BRIDGE (UP 2)            relative — must be wrapped in ( ) or [ ]
+//   CHORUS (+1)              +n / -n, wrapped
+//   KEY CHANGE A             a marker on its own row becomes a visible
+//                            "KEY CHANGE" step in the flow
+//
+// The change applies from that section to the end of the song, unless a later
+// marker changes it again (e.g. back to the original key). Relative markers
+// resolve against the song's SCALE; if the scale is missing they're ignored.
+// The marker is stripped from the label (so chord-sheet matching stays clean)
+// but left verbatim in comments (humans read those).
+// ============================================================
+
+/** "A", "BB", "f#", "Abm" → canonical "A" / "Bb" / "F#" / "Abm", or null. */
+function normalizeKeyToken(raw: string): string | null {
+  const m = raw.trim().match(/^([A-Ga-g])([#♯]|[bB♭])?([mM])?$/)
+  if (!m) return null
+  const key = m[1].toUpperCase()
+    + (m[2] ? (m[2] === '#' || m[2] === '♯' ? '#' : 'b') : '')
+    + (m[3] ? 'm' : '')
+  return keyIndex(key) !== null ? key : null
+}
+
+// Absolute: requires the word KEY, so prose like "(ALL)" or "TO A" never triggers.
+const KC_ABS_RE =
+  /(?:NEW\s+)?KEY(?:\s*CHANGE)?(?:\s+(?:OF|TO))?\s*[:\-–]?\s*([A-G][#♯bB♭]?[mM]?)(?![A-Za-z0-9#♯])/i
+// Relative: only when wrapped — "(UP 2)", "[+1]" — or right after the word KEY.
+const KC_REL_WRAPPED_RE = /[(\[]\s*(?:(UP|DOWN)\s+(\d{1,2})|([+-])\s*(\d{1,2}))\s*[)\]]/i
+const KC_REL_AFTER_KEY_RE = /KEY(?:\s*CHANGE)?\s*[:\-–]?\s*(?:(UP|DOWN)\s+(\d{1,2})|([+-])\s*(\d{1,2}))(?!\d)/i
+// Strip forms (label only): the marker plus any wrapping brackets / dangling dash.
+const KC_STRIP_RE = new RegExp(
+  '\\s*[-–]?\\s*[(\\[]?\\s*(?:' +
+  '(?:NEW\\s+)?KEY(?:\\s*CHANGE)?(?:\\s+(?:OF|TO))?\\s*[:\\-–]?\\s*[A-G][#♯bB♭]?[mM]?' +
+  '|(?:UP|DOWN)\\s+\\d{1,2}' +
+  '|[+-]\\s*\\d{1,2}' +
+  ')\\s*[)\\]]?\\s*',
+  'i',
+)
+
+function keyChangeIn(text: string, songScale: string | null): string | null {
+  if (!text) return null
+  const abs = text.match(KC_ABS_RE)
+  if (abs) {
+    const key = normalizeKeyToken(abs[1])
+    if (key) return key
+  }
+  const rel = text.match(KC_REL_WRAPPED_RE) ?? text.match(KC_REL_AFTER_KEY_RE)
+  if (rel && songScale && keyIndex(songScale) !== null) {
+    const dirWord = rel[1]?.toUpperCase()
+    const n = parseInt(rel[2] ?? rel[4] ?? '', 10)
+    const sign = dirWord ? (dirWord === 'UP' ? 1 : -1) : (rel[3] === '+' ? 1 : -1)
+    if (Number.isFinite(n) && n >= 1 && n <= 11) return keyAtOffset(songScale, sign * n)
+  }
+  return null
+}
+
+/** Detect a key-change marker on a section row; clean the label if it carried it. */
+export function extractKeyChange(label: string, comments: string, songScale: string | null): { label: string; key_change: string | null } {
+  const fromLabel = keyChangeIn(label, songScale)
+  if (fromLabel) {
+    const cleaned = label.replace(KC_STRIP_RE, ' ').replace(/\s{2,}/g, ' ').trim()
+    // A marker on its own row stays visible as an explicit flow step
+    return { label: cleaned || 'KEY CHANGE', key_change: fromLabel }
+  }
+  return { label, key_change: keyChangeIn(comments, songScale) }
 }
 
 function parseTitleScale(raw: string): { title: string; scale: string | null } {
@@ -162,8 +237,10 @@ export async function parseChart(buffer: any, filename: string): Promise<ParseRe
 
     // Section row
     if (currentSong) {
-      const label = cellText(row.getCell(structureCol).value) // preserve original case
+      const rawLabel = cellText(row.getCell(structureCol).value) // preserve original case
       const comments = commentsCol > 0 ? cellText(row.getCell(commentsCol).value) : ''
+      // Mid-song key change marker (label preferred, comments accepted)
+      const { label, key_change } = extractKeyChange(rawLabel, comments, currentSong.scale)
 
       // Collect inline URLs into the current song
       const inlineUrls: string[] = []
@@ -193,6 +270,7 @@ export async function parseChart(buffer: any, filename: string): Promise<ParseRe
         order_index: currentSong.sections.length,
         label,
         comments,
+        key_change,
         instructions,
       })
     }

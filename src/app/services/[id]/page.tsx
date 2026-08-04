@@ -134,29 +134,34 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
         </div>
 
         <div className="space-y-3">
+          {/* Hero — the one card everyone should tap. Rich gradient + "start
+              here" eyebrow; everything below stays quiet zinc so this owns
+              the page without shouting. */}
           <Link
             href={`/services/${id}/my-part`}
-            className="flex items-center gap-4 bg-zinc-900 rounded-2xl px-5 py-5 active:bg-zinc-800 transition-colors border border-zinc-800/50"
+            className="relative overflow-hidden flex items-center gap-4 rounded-2xl px-5 py-6 active:scale-[0.99] transition-transform bg-gradient-to-br from-purple-600 via-purple-700 to-purple-950 ring-1 ring-purple-500/40 shadow-lg shadow-purple-950/50"
           >
-            <div className="w-11 h-11 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div aria-hidden className="pointer-events-none absolute -top-10 -right-10 w-40 h-40 rounded-full bg-white/10 blur-2xl" />
+            <div className="w-12 h-12 rounded-full bg-white/15 flex items-center justify-center shrink-0">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
               </svg>
             </div>
-            <div>
-              <p className="font-semibold text-white">My Part</p>
-              <p className="text-zinc-400 text-sm">Your instrument across the whole service</p>
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-purple-200/90 mb-0.5">Start here</p>
+              <p className="font-bold text-white text-lg leading-tight">Stage View</p>
+              <p className="text-purple-200/80 text-[13px] leading-snug">Your part + chords — the whole service in one place</p>
             </div>
-            <svg className="w-4 h-4 text-zinc-600 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-5 h-5 text-white/80 ml-auto shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
           </Link>
 
           <Link
             href={`/services/${id}/live`}
-            className="flex items-center gap-4 bg-zinc-900 rounded-2xl px-5 py-5 active:bg-zinc-800 transition-colors border border-purple-900/50"
+            className="flex items-center gap-4 bg-zinc-900 rounded-2xl px-5 py-5 active:bg-zinc-800 transition-colors border border-zinc-800/50"
           >
-            <div className="w-11 h-11 rounded-full bg-purple-900/40 flex items-center justify-center shrink-0">
+            <div className="w-11 h-11 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
               <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-pulse" />
             </div>
             <div>

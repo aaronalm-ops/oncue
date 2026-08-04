@@ -2,7 +2,7 @@ import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
-import { reorderBodyToChart } from '@/lib/chords/format'
+import { effectiveSectionKeys, reorderBodyToChart } from '@/lib/chords/format'
 import { canSeeChords } from '@/lib/chords/access'
 import { normTitle } from '@/lib/chords/service-chords'
 
@@ -21,12 +21,28 @@ export default async function ServiceSongChordsPage({ params }: { params: Promis
   const { data: viewerProfile } = await supabase.from('profiles').select('role, instrument, preferred_key').eq('id', user.id).single()
   if (!canSeeChords(viewerProfile?.role)) redirect(`/services/${id}`)
 
-  const { data: song } = await supabase
-    .from('songs')
-    .select('id, title, scale, service_id, sections(order_index, label)')
-    .eq('id', songId)
-    .eq('service_id', id)
-    .single()
+  type SectionRow = { order_index: number; label: string; key_change?: string | null }
+  type SongRow = { id: string; title: string; scale: string | null; service_id: string; sections: SectionRow[] }
+  let song: SongRow | null = null
+  {
+    const res = await supabase
+      .from('songs')
+      .select('id, title, scale, service_id, sections(order_index, label, key_change)')
+      .eq('id', songId)
+      .eq('service_id', id)
+      .single()
+    if (res.data) song = res.data as SongRow
+    else {
+      // Graceful pre-v16 fallback (key_change column not migrated yet)
+      const retry = await supabase
+        .from('songs')
+        .select('id, title, scale, service_id, sections(order_index, label)')
+        .eq('id', songId)
+        .eq('service_id', id)
+        .single()
+      song = (retry.data as SongRow | null) ?? null
+    }
+  }
   if (!song) notFound()
 
   // Resolve the library song: confirmed link first, then normalised title match
@@ -65,11 +81,24 @@ export default async function ServiceSongChordsPage({ params }: { params: Promis
     )
   }
 
-  // Rearrange the sheet to the conductor's flow for THIS service
-  const chartLabels = (song.sections ?? [])
-    .sort((a, b) => a.order_index - b.order_index)
-    .map(s => s.label)
-  const reordered = reorderBodyToChart(version.content_chordpro ?? '', chartLabels)
+  // Rearrange the sheet to the conductor's flow for THIS service.
+  // Mid-song key changes are baked in relative to the base key, so the
+  // viewer's whole-sheet transpose keeps the modulation interval intact.
+  const orderedSections = (song.sections ?? []).sort((a, b) => a.order_index - b.order_index)
+  const chartLabels = orderedSections.map(s => s.label)
+  const chartKeyChanges = orderedSections.map(s => s.key_change ?? null)
+  const hasKeyChanges = chartKeyChanges.some(k => k !== null)
+  const reordered = reorderBodyToChart(version.content_chordpro ?? '', chartLabels, {
+    keyChanges: chartKeyChanges,
+    storedKey: version.stored_key,
+    songKey: song.scale,
+  })
+  // "G → A" journey for the header chip
+  const journey = hasKeyChanges
+    ? effectiveSectionKeys(song.scale, chartKeyChanges)
+        .filter((k): k is string => !!k)
+        .filter((k, i, arr) => i === 0 || arr[i - 1] !== k)
+    : []
 
   // Preferred key: user's saved scale for this song → chart scale → as written
   const { data: pref } = await supabase
@@ -106,7 +135,7 @@ export default async function ServiceSongChordsPage({ params }: { params: Promis
           </div>
           {song.scale && (
             <span className="shrink-0 text-xs font-black px-2 py-0.5 rounded-lg bg-purple-600 text-white">
-              chart: {song.scale}
+              chart: {journey.length > 0 ? journey.join(' → ') : song.scale}
             </span>
           )}
         </div>

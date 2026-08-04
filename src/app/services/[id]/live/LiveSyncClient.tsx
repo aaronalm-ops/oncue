@@ -18,7 +18,7 @@ interface ImpromptuShare {
 }
 
 interface Instruction { id: string; instrument: string; text: string; is_intro: boolean }
-interface Section { id: string; order_index: number; label: string; comments: string; instructions: Instruction[] }
+interface Section { id: string; order_index: number; label: string; comments: string; key_change?: string | null; instructions: Instruction[] }
 interface Song { id: string; order_index: number; title: string; scale: string | null; medley_group: string | null; reference_links: string[]; sections: Section[] }
 
 interface Props {
@@ -342,6 +342,10 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   const isMyIntro = myInstruction?.is_intro ?? false
   const nextSectionLabel = nextFlat ? songs[nextFlat.songIdx].sections[nextFlat.sectionIdx]?.label : null
   const nextSongTitle = nextFlat && nextFlat.songIdx !== safeSongIdx ? songs[nextFlat.songIdx]?.title : null
+  // Modulation heads-up: warn one section EARLY (same song only)
+  const nextKeyChange = nextFlat && nextFlat.songIdx === safeSongIdx
+    ? songs[nextFlat.songIdx].sections[nextFlat.sectionIdx]?.key_change ?? null
+    : null
 
   const hc = highContrast
   const bg = hc ? 'bg-white' : 'bg-black'
@@ -452,10 +456,11 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
         onTouchStart={hasAnyChords ? onPaneTouchStart : undefined}
         onTouchEnd={hasAnyChords ? onPaneTouchEnd : undefined}
         className={`flex-1 min-h-0 ${hasAnyChords
-          ? 'flex overflow-x-auto snap-x snap-mandatory no-scrollbar lg:grid lg:grid-cols-2 lg:overflow-x-hidden'
+          ? 'flex overflow-x-auto snap-x snap-mandatory no-scrollbar sm:grid sm:grid-cols-2 sm:overflow-x-hidden'
           : 'flex flex-col'}`}
       >
-      <div className={hasAnyChords ? 'min-w-full lg:min-w-0 snap-center overflow-y-auto h-full' : 'flex-1 min-h-0 overflow-y-auto'}>
+      {/* sm not lg: unfolded foldables (~670–840px CSS) get both panes live */}
+      <div className={hasAnyChords ? 'min-w-full sm:min-w-0 snap-center overflow-y-auto h-full' : 'flex-1 min-h-0 overflow-y-auto'}>
       <div className="flex flex-col px-4 pt-3 pb-36 max-w-2xl mx-auto w-full gap-3">
 
         <div className="flex items-center gap-2">
@@ -480,6 +485,11 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           <h3 className={`text-2xl font-black uppercase tracking-wide ${fg}`}>{currentSection?.label}</h3>
           {isMyIntro && (
             <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0">YOUR INTRO</span>
+          )}
+          {currentSection?.key_change && (
+            <span className="text-[10px] font-black px-2 py-0.5 rounded bg-amber-500 text-black shrink-0">
+              KEY → {currentSection.key_change}
+            </span>
           )}
           {currentBpm !== null && (
             <button
@@ -551,6 +561,11 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
         {(nextSectionLabel || nextSongTitle) && (
           <p className={`text-xs ${dim}`}>
             Next: {nextSongTitle ? `${nextSongTitle} — ` : ''}{nextSectionLabel}
+            {nextKeyChange && (
+              <span className="ml-1.5 text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-black">
+                KEY → {nextKeyChange}
+              </span>
+            )}
           </p>
         )}
       </div>
@@ -558,12 +573,13 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
 
       {/* Chords pane */}
       {hasAnyChords && currentSong && (
-        <div className="min-w-full lg:min-w-0 snap-center overflow-y-auto h-full lg:border-l lg:border-zinc-800">
+        <div className="min-w-full sm:min-w-0 snap-center overflow-y-auto h-full sm:border-l sm:border-zinc-800">
           <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
             <ChordsPane
               key={currentSong.id}
               songTitle={currentSong.title}
               chartLabels={currentSong.sections.map(s => s.label)}
+              chartKeyChanges={currentSong.sections.map(s => s.key_change ?? null)}
               chords={chordsBySongId[currentSong.id] ?? null}
               songScale={currentSong.scale}
               initialKey={
@@ -585,7 +601,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
 
       {/* Chart / Chords pane switcher (phones) */}
       {hasAnyChords && (
-        <div className="lg:hidden fixed left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-full border p-0.5 bg-zinc-900/95 border-zinc-700"
+        <div className="sm:hidden fixed left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-full border p-0.5 bg-zinc-900/95 border-zinc-700"
           style={{ bottom: '118px' }}>
           <button onClick={() => scrollToPane(0)}
             className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${
