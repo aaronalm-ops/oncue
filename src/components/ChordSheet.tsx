@@ -7,6 +7,7 @@ interface Props {
   body: string
   highContrast?: boolean
   compact?: boolean
+  textScale?: number // 1 = default 13px; all inner sizes are em so they follow
 }
 
 /**
@@ -14,7 +15,7 @@ interface Props {
  * lyric lines with chord badges above the syllable they attach to.
  * Shared by the review editor preview and (Phase 2+) the service views.
  */
-export default function ChordSheet({ body, highContrast = false, compact = false }: Props) {
+export default function ChordSheet({ body, highContrast = false, compact = false, textScale = 1 }: Props) {
   const lines = useMemo(() => parseBody(body), [body])
   const hc = highContrast
 
@@ -23,7 +24,10 @@ export default function ChordSheet({ body, highContrast = false, compact = false
   }
 
   return (
-    <div className={`${compact ? 'space-y-0.5' : 'space-y-1'} font-mono text-[13px] leading-relaxed`}>
+    <div
+      className={`${compact ? 'space-y-0.5' : 'space-y-1'} font-mono leading-relaxed`}
+      style={{ fontSize: `${Math.round(13 * textScale * 10) / 10}px` }}
+    >
       {lines.map((line, i) => <Line key={i} line={line} hc={hc} />)}
     </div>
   )
@@ -34,7 +38,7 @@ function Line({ line, hc }: { line: BodyLine; hc: boolean }) {
 
   if (line.type === 'section') {
     return (
-      <p className={`pt-3 pb-0.5 font-sans text-xs font-bold uppercase tracking-widest ${hc ? 'text-zinc-700' : 'text-purple-400'}`}>
+      <p className={`pt-3 pb-0.5 font-sans text-[0.92em] font-bold uppercase tracking-widest ${hc ? 'text-zinc-700' : 'text-purple-400'}`}>
         {line.label}
       </p>
     )
@@ -42,7 +46,7 @@ function Line({ line, hc }: { line: BodyLine; hc: boolean }) {
 
   if (line.type === 'flow') {
     return (
-      <p className={`font-sans text-xs italic ${hc ? 'text-zinc-500' : 'text-zinc-500'}`}>
+      <p className={`font-sans text-[0.92em] italic ${hc ? 'text-zinc-500' : 'text-zinc-500'}`}>
         → {line.label}{line.times > 1 ? ` ×${line.times}` : ''}
       </p>
     )
@@ -78,7 +82,7 @@ function ChordBadge({ chord, hc, size }: { chord: string; hc: boolean; size: 'sm
   const known = isChordToken(chord)
   return (
     <span
-      className={`font-bold ${size === 'sm' ? 'text-[11px] leading-none mb-0.5' : ''} ${
+      className={`font-bold ${size === 'sm' ? 'text-[0.85em] leading-none mb-0.5' : ''} ${
         hc ? 'text-black' : 'text-amber-300'
       } ${known ? '' : 'underline decoration-dotted decoration-red-400 underline-offset-2'}`}
       title={known ? undefined : 'Unrecognised chord — not transposed'}

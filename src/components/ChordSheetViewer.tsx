@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import ChordSheet from '@/components/ChordSheet'
 import { ALL_KEYS, keyIndex, transposeBody, transposeHint } from '@/lib/chords/format'
@@ -32,6 +32,13 @@ export default function ChordSheetViewer({ body, storedKey, initialKey, libraryS
   })
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Follow the chord-text-size preference set from the My Part / Live pane
+  const [textScale, setTextScale] = useState(1)
+  useEffect(() => {
+    const s = parseFloat(localStorage.getItem('oncue-chord-size') ?? '')
+    if (Number.isFinite(s) && s >= 0.8 && s <= 1.5) setTextScale(s)
+  }, [])
 
   function selectKey(k: string) {
     setTargetKey(k)
@@ -108,7 +115,7 @@ export default function ChordSheetViewer({ body, storedKey, initialKey, libraryS
           </p>
         )
       )}
-      <ChordSheet body={shown} highContrast={hc} />
+      <ChordSheet body={shown} highContrast={hc} textScale={textScale} />
     </div>
   )
 }

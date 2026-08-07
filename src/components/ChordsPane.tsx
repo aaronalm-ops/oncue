@@ -59,6 +59,19 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentRef = useRef<HTMLDivElement | null>(null)
 
+  // Chord text size — per-device, shared across My Part / Live / full sheets.
+  // Kept out of the way: an "Aa" chip reveals the slider only when wanted.
+  const [textScale, setTextScale] = useState(1)
+  const [sizeOpen, setSizeOpen] = useState(false)
+  useEffect(() => {
+    const s = parseFloat(localStorage.getItem('oncue-chord-size') ?? '')
+    if (Number.isFinite(s) && s >= 0.8 && s <= 1.5) setTextScale(s)
+  }, [])
+  function changeScale(v: number) {
+    setTextScale(v)
+    localStorage.setItem('oncue-chord-size', String(v))
+  }
+
   function selectKey(k: string) {
     setTargetKey(k)
     if (!chords) return
@@ -151,25 +164,64 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
           </span>
         </div>
       )}
-      {/* Key strip */}
-      {canTranspose && (
-        <div className="mb-3 -mx-1 px-1 flex items-center gap-1 overflow-x-auto no-scrollbar">
-          <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-widest mr-1 ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>
-            Key
-          </span>
-          {ALL_KEYS.map(k => (
-            <button
-              key={k}
-              onClick={() => selectKey(k)}
-              className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold transition-all active:scale-95 ${
-                k === targetKey
-                  ? 'bg-purple-600 text-white'
-                  : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
-              }`}
-            >
-              {k}
+      {/* Key strip + text-size chip (chip stays fixed while keys scroll) */}
+      <div className="mb-3 flex items-center gap-2">
+        {canTranspose ? (
+          <div className="-mx-1 px-1 flex-1 min-w-0 flex items-center gap-1 overflow-x-auto no-scrollbar">
+            <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-widest mr-1 ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>
+              Key
+            </span>
+            {ALL_KEYS.map(k => (
+              <button
+                key={k}
+                onClick={() => selectKey(k)}
+                className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold transition-all active:scale-95 ${
+                  k === targetKey
+                    ? 'bg-purple-600 text-white'
+                    : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
+                }`}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex-1" />
+        )}
+        <button
+          onClick={() => setSizeOpen(o => !o)}
+          aria-label="Chord text size"
+          title="Chord text size"
+          className={`shrink-0 rounded-lg px-2 py-1 text-xs font-bold transition-colors ${
+            sizeOpen || textScale !== 1
+              ? 'bg-purple-600 text-white'
+              : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
+          }`}
+        >
+          Aa
+        </button>
+      </div>
+
+      {/* Size slider — only while open, one slim row */}
+      {sizeOpen && (
+        <div className={`mb-3 flex items-center gap-3 rounded-xl border px-3 py-2 ${
+          hc ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-900 border-zinc-800'
+        }`}>
+          <span className={`shrink-0 text-[10px] font-bold ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>A</span>
+          <input
+            type="range" min="0.8" max="1.5" step="0.05"
+            value={textScale}
+            onChange={e => changeScale(parseFloat(e.target.value))}
+            className="flex-1 accent-purple-600"
+            aria-label="Chord text size slider"
+          />
+          <span className={`shrink-0 text-base font-bold ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>A</span>
+          {textScale !== 1 && (
+            <button onClick={() => changeScale(1)}
+              className={`shrink-0 text-[10px] font-semibold px-2 py-1 rounded-lg ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
+              Reset
             </button>
-          ))}
+          )}
         </div>
       )}
 
@@ -211,7 +263,7 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
                   body={modDelta !== 0 && canTranspose
                     ? transposeBody(sec.content, storedKey!, keyAtOffset(shownKey ?? storedKey!, modDelta))
                     : transpose(sec.content)}
-                  highContrast={hc} compact />
+                  highContrast={hc} compact textScale={textScale} />
               ) : canMapSections && chordSectionLabels.length > 0 ? (
                 <select
                   defaultValue=""
@@ -238,7 +290,7 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
             {mapped!.leftovers.map(s => (
               <div key={s.order_index} className="mb-2">
                 <p className={`text-[10px] font-bold uppercase tracking-widest mb-0.5 ${hc ? 'text-zinc-500' : 'text-zinc-600'}`}>{s.label}</p>
-                <ChordSheet body={transpose(s.content)} highContrast={hc} compact />
+                <ChordSheet body={transpose(s.content)} highContrast={hc} compact textScale={textScale} />
               </div>
             ))}
           </div>
