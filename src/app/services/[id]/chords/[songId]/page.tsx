@@ -138,6 +138,18 @@ export default async function ServiceSongChordsPage({ params }: { params: Promis
               chart: {journey.length > 0 ? journey.join(' → ') : song.scale}
             </span>
           )}
+          {/* Spot a wrong chord? Fix it right here — Approve brings you back
+              to this exact view (returnTo), open to every member per v6. */}
+          <Link
+            href={`/library/${librarySongId}/version/${version.id}?returnTo=/services/${id}/chords/${songId}`}
+            className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0 active:bg-zinc-800 transition-colors"
+            aria-label="Edit these chords"
+            title="Edit these chords"
+          >
+            <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </Link>
         </div>
 
         {reordered.matched === 0 && (

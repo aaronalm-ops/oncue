@@ -125,10 +125,10 @@ export default function VersionEditorClient({ songId, songTitle, version, pdfUrl
 
       {/* Header */}
       <div className="shrink-0 border-b border-zinc-800 px-4 py-2.5 flex items-center gap-3">
-        <Link href={`/library/${songId}`}
+        <Link href={returnTo ?? `/library/${songId}`}
           onClick={e => { if (dirty && !window.confirm('You have unsaved changes. Leave anyway?')) e.preventDefault() }}
           className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0"
-          aria-label="Back to song">
+          aria-label="Back">
           <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
