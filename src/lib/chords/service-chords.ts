@@ -39,15 +39,32 @@ export async function fetchServiceChords(
   if (songs.length === 0) return empty
 
   const songIds = songs.map(s => s.id)
+  // P5: filter the library by pre-normalised title (v17 norm_title column,
+  // indexed) instead of scanning the whole table on every render.
+  const normTitles = [...new Set(songs.map(s => norm(s.title)))]
   const [{ data: links }, libRes] = await Promise.all([
     supabase.from('song_links').select('song_id, library_song_id').in('song_id', songIds),
-    supabase.from('library_songs').select('id, title, tempo_bpm'),
+    supabase.from('library_songs').select('id, title, tempo_bpm').in('norm_title', normTitles),
   ])
-  // v14 migration (tempo_bpm) not applied yet? Degrade gracefully.
-  const librarySongs: Array<{ id: string; title: string; tempo_bpm?: number | null }> =
-    libRes.error
+
+  let librarySongs: Array<{ id: string; title: string; tempo_bpm?: number | null }> = []
+  if (libRes.error) {
+    // Pre-v17 (no norm_title) — degrade to the old full scan; pre-v14 inside that.
+    const full = await supabase.from('library_songs').select('id, title, tempo_bpm')
+    librarySongs = full.error
       ? (await supabase.from('library_songs').select('id, title')).data ?? []
-      : libRes.data ?? []
+      : full.data ?? []
+  } else {
+    librarySongs = libRes.data ?? []
+    // Confirmed links can point at songs whose titles no longer match (renames)
+    // — fetch just those stragglers. Usually zero, so usually skipped.
+    const have = new Set(librarySongs.map(l => l.id))
+    const missing = [...new Set((links ?? []).map(l => l.library_song_id))].filter(lid => !have.has(lid))
+    if (missing.length > 0) {
+      const { data: extra } = await supabase.from('library_songs').select('id, title, tempo_bpm').in('id', missing)
+      librarySongs = librarySongs.concat(extra ?? [])
+    }
+  }
 
   const linkMap = new Map((links ?? []).map(l => [l.song_id, l.library_song_id]))
   const byTitle = new Map(librarySongs.map(ls => [norm(ls.title), ls.id]))

@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import ChordsPane from '@/components/ChordsPane'
+import ChordSheetViewer from '@/components/ChordSheetViewer'
 import PulsePrompt from '@/components/PulsePrompt'
 import { usePulsePref } from '@/lib/use-pulse'
 import type { SongChordsData } from '@/lib/chords/service-chords'
@@ -328,6 +329,54 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   // Beat pulse — shared, on-by-default preference (same choice powers Live)
   const { pulseOn, pulsePrompt, togglePulse, answerPulsePrompt } = usePulsePref()
 
+  // W2: impromptu live share, mirrored from the Live view — if someone pushes
+  // a spontaneous song while this device is in live mode, it appears here too.
+  const [impromptu, setImpromptu] = useState<{
+    librarySongId: string; title: string; storedKey: string | null; body: string; sharedKey: string | null
+  } | null>(null)
+  const impromptuRef = useRef<string | null>(null)
+  const [endingImpromptu, setEndingImpromptu] = useState(false)
+
+  async function applyImpromptu(libId: string | null, sharedKey: string | null) {
+    if (libId === impromptuRef.current) return
+    impromptuRef.current = libId
+    if (!libId) {
+      setImpromptu(null)
+      return
+    }
+    const supabase = getClient()
+    const [{ data: libSong }, { data: vers }] = await Promise.all([
+      supabase.from('library_songs').select('title').eq('id', libId).single(),
+      supabase
+        .from('song_versions')
+        .select('stored_key, content_chordpro')
+        .eq('library_song_id', libId)
+        .not('reviewed_at', 'is', null)
+        .order('reviewed_at', { ascending: false })
+        .limit(1),
+    ])
+    const v = vers?.[0]
+    if (libSong && v?.content_chordpro && impromptuRef.current === libId) {
+      setImpromptu({ librarySongId: libId, title: libSong.title, storedKey: v.stored_key, body: v.content_chordpro, sharedKey })
+    }
+  }
+
+  async function endImpromptu() {
+    setEndingImpromptu(true)
+    try {
+      const { error } = await getClient().rpc('set_impromptu', {
+        p_service_id: serviceId,
+        p_library_song_id: null,
+        p_key: null,
+      })
+      if (error) console.error('[my-part] end impromptu failed', error)
+    } finally {
+      setEndingImpromptu(false)
+    }
+    impromptuRef.current = null
+    setImpromptu(null)
+  }
+
   // Song tempo memory (v14): lives on the library song, shown/edited here
   const [tempos, setTempos] = useState<Record<string, number | null>>(() => {
     const t: Record<string, number | null> = {}
@@ -435,12 +484,27 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     if (!isLive) {
       channelRef.current?.unsubscribe()
       channelRef.current = null
+      // Leaving live mode also leaves the shared impromptu view
+      impromptuRef.current = null
+      setImpromptu(null)
       return
     }
 
     let retryTimeout: ReturnType<typeof setTimeout> | undefined
     let cancelled = false
     setLiveStatus('connecting')
+
+    // W2: catch an impromptu that was ALREADY live before we joined
+    getClient()
+      .from('session_state')
+      .select('impromptu_library_song_id, impromptu_key')
+      .eq('service_id', serviceId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled || !data) return
+        const st = data as { impromptu_library_song_id?: string | null; impromptu_key?: string | null }
+        applyImpromptu(st.impromptu_library_song_id ?? null, st.impromptu_key ?? null)
+      })
 
     // session_state can point past the current chart after a shrink — clamp on
     // receipt so songs[activeSongIdx] can never be undefined.
@@ -470,7 +534,16 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
           'postgres_changes',
           { event: '*', schema: 'public', table: 'session_state', filter: `service_id=eq.${serviceId}` },
           (payload) => {
-            const state = payload.new as { current_song_index?: number; updated_by?: string }
+            const state = payload.new as {
+              current_song_index?: number
+              updated_by?: string
+              impromptu_library_song_id?: string | null
+              impromptu_key?: string | null
+            }
+            // W2: impromptu changes apply for everyone (own echo = no-op)
+            if ('impromptu_library_song_id' in state) {
+              applyImpromptu(state.impromptu_library_song_id ?? null, state.impromptu_key ?? null)
+            }
             // Don't apply our own broadcasts
             if (state.updated_by === userId) return
             applyIndex(state.current_song_index)
@@ -568,7 +641,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     return (
       <div className={`min-h-screen ${bg} flex flex-col items-center justify-center gap-4 px-6 text-center`}>
         <p className={`font-semibold ${fg}`}>No songs found in this service.</p>
-        <p className={dim + ' text-sm'}>The chart may have been parsed incorrectly. Delete it and re-upload.</p>
+        <p className={dim + ' text-sm'}>The chart may have been parsed incorrectly — an admin can delete and re-upload it.</p>
         <Link href={`/services/${serviceId}`} className="text-purple-400 text-sm mt-2">← Back to the service</Link>
       </div>
     )
@@ -706,6 +779,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
               songTitle={activeSong.title}
               chartLabels={activeSong.sections.map(s => s.label)}
               chartKeyChanges={activeSong.sections.map(s => s.key_change ?? null)}
+              attachHref={`/library?attachSong=${activeSong.id}&attachService=${serviceId}&attachTitle=${encodeURIComponent(activeSong.title)}`}
               chords={chordsBySongId[activeSong.id] ?? null}
               songScale={activeSong.scale}
               initialKey={
@@ -741,6 +815,36 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
             }`}>
             Chords
           </button>
+        </div>
+      )}
+
+      {/* W2: impromptu live share — mirrors the Live view while in live mode */}
+      {isLive && impromptu && (
+        <div className={`fixed inset-0 z-30 overflow-y-auto ${hc ? 'bg-white' : 'bg-black'} px-4 pt-6 pb-40`}>
+          <div className="max-w-2xl mx-auto">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500 mb-1">
+              ● Impromptu — shared live
+            </p>
+            <p className={`text-lg font-bold leading-tight mb-4 ${fg}`}>{impromptu.title}</p>
+            <ChordSheetViewer
+              key={impromptu.librarySongId}
+              body={impromptu.body}
+              storedKey={impromptu.storedKey}
+              initialKey={prefsByLibraryId[impromptu.librarySongId] ?? impromptu.sharedKey}
+              librarySongId={impromptu.librarySongId}
+              userId={userId}
+              highContrast={hc}
+              instrument={viewInstrument}
+              preferredKey={preferredKey}
+            />
+            <button
+              onClick={endImpromptu}
+              disabled={endingImpromptu}
+              className="mt-6 w-full rounded-xl bg-amber-600 py-3 text-sm font-semibold text-white disabled:opacity-50 active:scale-95 transition-transform"
+            >
+              {endingImpromptu ? 'Ending…' : 'End impromptu for everyone'}
+            </button>
+          </div>
         </div>
       )}
 

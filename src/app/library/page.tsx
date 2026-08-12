@@ -1,11 +1,11 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import LibraryClient from './LibraryClient'
 import type { AppRole } from '@/lib/types'
 
 export default async function LibraryPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) redirect('/auth/login')
 
   // "Add chords" intent from a service song row
@@ -18,13 +18,21 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
     ? { songId: attachSong, serviceId: attachService, title: attachTitle }
     : null
 
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
+  // P2: profile, song list, and pending uploads are independent — one stage.
+  // P7: uploads select lists columns explicitly (draft_body can be huge and
+  // the confirm cards never render it).
+  const [{ data: profile }, { data, error }, { data: uploadRows }] = await Promise.all([
+    supabase.from('profiles').select('role').eq('id', user.id).single(),
+    supabase
+      .from('library_songs')
+      .select('id, title, artist, created_at, song_versions(id, label, stored_key, reviewed_at)')
+      .order('title', { ascending: true }),
+    supabase
+      .from('chord_uploads')
+      .select('id, original_filename, status, draft_title, draft_artist, draft_key, draft_bpm, section_count, warnings')
+      .order('created_at', { ascending: true }),
+  ])
   const role = (profile?.role ?? 'member') as AppRole
-
-  const { data, error } = await supabase
-    .from('library_songs')
-    .select('id, title, artist, created_at, song_versions(id, label, stored_key, reviewed_at)')
-    .order('title', { ascending: true })
 
   // Table doesn't exist yet — SQL migration hasn't been run
   if (error?.message?.includes('does not exist')) {
@@ -40,14 +48,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
   }
 
   // Pending confirm-queue entries — v6: visible to every member (shared queue)
-  let pendingUploads: Parameters<typeof LibraryClient>[0]['pendingUploads'] = []
-  {
-    const { data: uploads } = await supabase
-      .from('chord_uploads')
-      .select('*')
-      .order('created_at', { ascending: true })
-    pendingUploads = (uploads ?? []) as typeof pendingUploads
-  }
+  const pendingUploads = (uploadRows ?? []) as Parameters<typeof LibraryClient>[0]['pendingUploads']
 
   return (
     <LibraryClient

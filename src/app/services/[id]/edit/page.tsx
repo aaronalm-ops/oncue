@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { notFound, redirect } from 'next/navigation'
 import EditSetlistClient from './EditSetlistClient'
 
@@ -6,7 +6,7 @@ export default async function EditSetlistPage({ params }: { params: Promise<{ id
   const { id } = await params
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) redirect('/auth/login')
 
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single()

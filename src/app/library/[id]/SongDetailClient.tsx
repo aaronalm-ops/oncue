@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
@@ -12,7 +12,7 @@ interface Version {
   bpm: number | null
   ccli_number: string | null
   reviewed_at: string | null
-  content: string
+  content?: string // lazy-loaded on expand (P7) — undefined until fetched
 }
 
 interface Props {
@@ -27,10 +27,44 @@ interface Props {
   sharedLiveNow: boolean
 }
 
-export default function SongDetailClient({ song, versions, canManage, userId, perSongKey, globalPreferredKey, instrument, todayServiceId, sharedLiveNow }: Props) {
+export default function SongDetailClient({ song, versions: versionsProp, canManage, userId, perSongKey, globalPreferredKey, instrument, todayServiceId, sharedLiveNow }: Props) {
+  // P3: local copies instead of router.refresh() round-trips; kept in sync
+  // with the server prop so refreshes from elsewhere still win. Lazy-loaded
+  // chord bodies are preserved across prop syncs.
+  const [versions, setVersions] = useState(versionsProp)
+  const [display, setDisplay] = useState({ title: song.title, artist: song.artist })
+  useEffect(() => {
+    setVersions(prev => versionsProp.map(p => ({
+      ...p,
+      content: p.content ?? prev.find(x => x.id === p.id)?.content,
+    })))
+  }, [versionsProp])
+  useEffect(() => { setDisplay({ title: song.title, artist: song.artist }) }, [song.title, song.artist])
+
   const [openVersion, setOpenVersion] = useState<string | null>(
-    versions.find(v => v.reviewed_at)?.id ?? versions[0]?.id ?? null
+    versionsProp.find(v => v.reviewed_at)?.id ?? versionsProp[0]?.id ?? null
   )
+
+  // P7: fetch a version's body only when it's actually opened
+  useEffect(() => {
+    if (!openVersion) return
+    const v = versions.find(x => x.id === openVersion)
+    if (!v || v.content !== undefined) return
+    let cancelled = false
+    ;(async () => {
+      const { createClient: createBrowserClient } = await import('@/lib/supabase/client')
+      const { data } = await createBrowserClient()
+        .from('song_versions')
+        .select('content_chordpro')
+        .eq('id', openVersion)
+        .single()
+      if (cancelled) return
+      setVersions(prev => prev.map(x =>
+        x.id === openVersion ? { ...x, content: data?.content_chordpro ?? '' } : x
+      ))
+    })()
+    return () => { cancelled = true }
+  }, [openVersion, versions])
   const [deleting, setDeleting] = useState<string | null>(null)
   const [editingMeta, setEditingMeta] = useState(false)
   const [metaTitle, setMetaTitle] = useState(song.title)
@@ -92,7 +126,7 @@ export default function SongDetailClient({ song, versions, canManage, userId, pe
     setSavingMeta(false)
     if (res.ok) {
       setEditingMeta(false)
-      router.refresh()
+      setDisplay({ title: metaTitle.trim(), artist: metaArtist.trim() || null }) // instant, no refresh
     } else {
       const data = await res.json()
       setMetaError(data.error ?? 'Failed to save')
@@ -104,7 +138,7 @@ export default function SongDetailClient({ song, versions, canManage, userId, pe
     setDeleting(id)
     const res = await fetch(`/api/library/versions/${id}`, { method: 'DELETE' })
     setDeleting(null)
-    if (res.ok) router.refresh()
+    if (res.ok) setVersions(prev => prev.filter(v => v.id !== id)) // instant, no refresh
   }
 
   return (
@@ -148,8 +182,8 @@ export default function SongDetailClient({ song, versions, canManage, userId, pe
             </div>
           ) : (
             <div className="min-w-0 ml-1 flex-1">
-              <h1 className="text-xl font-bold tracking-tight truncate">{song.title}</h1>
-              {song.artist && <p className="text-xs text-zinc-500 truncate">{song.artist}</p>}
+              <h1 className="text-xl font-bold tracking-tight truncate">{display.title}</h1>
+              {display.artist && <p className="text-xs text-zinc-500 truncate">{display.artist}</p>}
             </div>
           )}
           {canManage && !editingMeta && (
@@ -229,7 +263,12 @@ export default function SongDetailClient({ song, versions, canManage, userId, pe
                 </svg>
               </button>
 
-              {openVersion === v.id && (
+              {openVersion === v.id && v.content === undefined && (
+                <div className="border-t border-zinc-800 px-4 py-6 flex justify-center">
+                  <div className="w-5 h-5 border-2 border-zinc-700 border-t-purple-500 rounded-full animate-spin" />
+                </div>
+              )}
+              {openVersion === v.id && v.content !== undefined && (
                 <div className="border-t border-zinc-800 px-4 py-3">
                   <ChordSheetViewer
                     body={v.content}

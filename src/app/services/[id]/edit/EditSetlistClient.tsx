@@ -116,6 +116,10 @@ export default function EditSetlistClient({ serviceId, serviceDate, leaders, ini
         <div className="flex items-center gap-3 mb-1">
           <Link
             href={`/services/${serviceId}`}
+            onClick={e => {
+              // W8: leaving with unsaved changes deserves a heads-up
+              if (dirty && !window.confirm('You have unsaved setlist changes. Leave without saving?')) e.preventDefault()
+            }}
             className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center active:bg-zinc-800 transition-colors shrink-0"
           >
             <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

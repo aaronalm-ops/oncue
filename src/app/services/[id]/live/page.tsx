@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import LiveSyncClient from './LiveSyncClient'
 import { fetchServiceChords } from '@/lib/chords/service-chords'
@@ -8,31 +8,26 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
   const { id } = await params
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('instrument, role, preferred_key')
-    .eq('id', user!.id)
-    .single()
+  const user = await getAuthUser(supabase) // local JWT validation (P1)
 
-  const { data: service } = await supabase
-    .from('services')
-    .select('id, service_date, day_of_week, instruments')
-    .eq('id', id)
-    .single()
+  // P2: profile, service, songs, and session state are independent — one stage
+  const [{ data: profile }, { data: service }, songsRes, { data: sessionState }] = await Promise.all([
+    supabase.from('profiles').select('instrument, role, preferred_key').eq('id', user!.id).single(),
+    supabase.from('services').select('id, service_date, day_of_week, instruments').eq('id', id).single(),
+    supabase
+      .from('songs')
+      .select(`
+        id, order_index, title, scale, medley_group, reference_links, in_chart,
+        sections (
+          id, order_index, label, comments, key_change,
+          instructions ( id, instrument, text, is_intro )
+        )
+      `)
+      .eq('service_id', id)
+      .order('order_index'),
+    supabase.from('session_state').select('*').eq('service_id', id).single(),
+  ])
   if (!service) notFound()
-
-  const songsRes = await supabase
-    .from('songs')
-    .select(`
-      id, order_index, title, scale, medley_group, reference_links, in_chart,
-      sections (
-        id, order_index, label, comments, key_change,
-        instructions ( id, instrument, text, is_intro )
-      )
-    `)
-    .eq('service_id', id)
-    .order('order_index')
 
   // v5 migration (in_chart) not applied yet? Degrade gracefully.
   const songs = songsRes.error
@@ -60,11 +55,25 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
       })),
   }))
 
-  const { data: sessionState } = await supabase
-    .from('session_state')
-    .select('*')
-    .eq('service_id', id)
-    .single()
+  // P2: impromptu resolution and the chords resolver run together — stage two
+  const impromptuLibId = (sessionState as { impromptu_library_song_id?: string | null } | null)?.impromptu_library_song_id ?? null
+  const [impromptuParts, chords] = await Promise.all([
+    impromptuLibId
+      ? Promise.all([
+          supabase.from('library_songs').select('title').eq('id', impromptuLibId).single(),
+          supabase
+            .from('song_versions')
+            .select('stored_key, content_chordpro')
+            .eq('library_song_id', impromptuLibId)
+            .not('reviewed_at', 'is', null)
+            .order('reviewed_at', { ascending: false })
+            .limit(1),
+        ])
+      : Promise.resolve(null),
+    canSeeChords(profile?.role)
+      ? fetchServiceChords(supabase, sortedSongs, user!.id)
+      : Promise.resolve({ chordsBySongId: {}, prefsByLibraryId: {} }),
+  ])
 
   // Impromptu live share: if a library song is being shared right now,
   // resolve its latest reviewed version for the initial render.
@@ -75,18 +84,8 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
     body: string
     sharedKey: string | null
   } | null = null
-  const impromptuLibId = (sessionState as { impromptu_library_song_id?: string | null } | null)?.impromptu_library_song_id ?? null
-  if (impromptuLibId) {
-    const [{ data: libSong }, { data: impVersions }] = await Promise.all([
-      supabase.from('library_songs').select('title').eq('id', impromptuLibId).single(),
-      supabase
-        .from('song_versions')
-        .select('stored_key, content_chordpro')
-        .eq('library_song_id', impromptuLibId)
-        .not('reviewed_at', 'is', null)
-        .order('reviewed_at', { ascending: false })
-        .limit(1),
-    ])
+  if (impromptuLibId && impromptuParts) {
+    const [{ data: libSong }, { data: impVersions }] = impromptuParts
     const v = impVersions?.[0]
     if (libSong && v?.content_chordpro) {
       initialImpromptu = {
@@ -104,11 +103,6 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
   const validatedInstrument = profileInstrument && service.instruments.includes(profileInstrument)
     ? profileInstrument
     : (service.instruments[0] ?? null)
-
-  // Chords pane data — gated to editors until the parser rollout opens
-  const chords = canSeeChords(profile?.role)
-    ? await fetchServiceChords(supabase, sortedSongs, user!.id)
-    : { chordsBySongId: {}, prefsByLibraryId: {} }
 
   const isEditor = true // v6: any member can map sections
 

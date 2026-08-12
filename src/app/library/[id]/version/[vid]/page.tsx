@@ -1,5 +1,5 @@
 import { redirect, notFound } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import VersionEditorClient from './VersionEditorClient'
 
 export default async function VersionEditorPage({ params, searchParams }: {
@@ -13,7 +13,7 @@ export default async function VersionEditorPage({ params, searchParams }: {
   const rawReturn = Array.isArray(sp.returnTo) ? sp.returnTo[0] : sp.returnTo
   const returnTo = rawReturn && rawReturn.startsWith('/') && !rawReturn.startsWith('//') ? rawReturn : null
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) redirect('/auth/login')
 
   // v6: every member can review and correct chords

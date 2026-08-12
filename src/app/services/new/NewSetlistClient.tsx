@@ -38,8 +38,10 @@ interface Props {
  */
 export default function NewSetlistClient({ leaders, currentUserId }: Props) {
   const [date, setDate] = useState('')
+  // W12: default to the CREATOR if they're a worship leader, else Unassigned.
+  // Never silently pin the alphabetically-first leader onto a service.
   const [leaderId, setLeaderId] = useState(
-    leaders.find(l => l.isLeader)?.id ?? leaders.find(l => l.id === currentUserId)?.id ?? ''
+    leaders.find(l => l.id === currentUserId && l.isLeader)?.id ?? ''
   )
   const [songs, setSongs] = useState<SetlistSong[]>([])
   const [saving, setSaving] = useState(false)
@@ -126,13 +128,15 @@ export default function NewSetlistClient({ leaders, currentUserId }: Props) {
     // song_links is UNIQUE(song_id); existing links are left alone).
     const { data: libSongs } = await supabase.from('library_songs').select('id, title')
     const libMap = new Map((libSongs ?? []).map(ls => [normTitle(ls.title), ls.id]))
-    for (const s of existing.songs) {
-      const libId = libMap.get(normTitle(s.title))
-      if (!libId) continue
+    // P4: one batched upsert instead of a round-trip per song
+    const links = existing.songs
+      .map(s => ({ song_id: s.id, library_song_id: libMap.get(normTitle(s.title)) }))
+      .filter((l): l is { song_id: string; library_song_id: string } => !!l.library_song_id)
+    if (links.length > 0) {
       const { error: linkErr } = await supabase
         .from('song_links')
-        .upsert({ song_id: s.id, library_song_id: libId }, { onConflict: 'song_id', ignoreDuplicates: true })
-      if (linkErr) console.error('link failed for', s.title, linkErr.message)
+        .upsert(links, { onConflict: 'song_id', ignoreDuplicates: true })
+      if (linkErr) console.error('link batch failed', linkErr.message)
     }
 
     // Snapshot the (now-attributed) leader's arrangement — best-effort

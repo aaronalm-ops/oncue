@@ -36,9 +36,11 @@ export async function proxy(request: NextRequest) {
     },
   })
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // P1: getClaims validates the JWT locally (asymmetric keys) instead of a
+  // network round-trip on EVERY navigation; refreshes only when expired.
+  const { data: claimsData } = await supabase.auth.getClaims()
 
-  if (!user) {
+  if (!claimsData?.claims?.sub) {
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     return NextResponse.redirect(url)

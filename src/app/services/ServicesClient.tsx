@@ -18,8 +18,11 @@ function formatDate(dateStr: string) {
 }
 
 function whatsappUrl(service: Service) {
+  // W7: neutral wording (works for chart uploads AND setlist drafts) + a
+  // direct link so the team lands on the service in one tap.
   const label = formatDate(service.service_date)
-  const text = `The chart for the service ${label} has been uploaded.`
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const text = `The service for ${label} is up on OnCue: ${origin}/services/${service.id}`
   return `https://wa.me/?text=${encodeURIComponent(text)}`
 }
 
@@ -61,7 +64,13 @@ export default function ServicesClient({
   async function handleDelete(id: string, filename: string) {
     setDeleting(id)
     const supabase = createClient()
-    await supabase.from('services').delete().eq('id', id)
+    const { error } = await supabase.from('services').delete().eq('id', id)
+    // W13: a failed delete must not pretend it worked
+    if (error) {
+      setDeleting(null)
+      window.alert(`Couldn't delete this service: ${error.message}`)
+      return
+    }
     // Best-effort: clean up the file from Storage (don't fail if it errors)
     supabase.storage.from('charts').remove([`${id}/${filename}`]).catch(() => {})
     setList(prev => prev.filter(s => s.id !== id))

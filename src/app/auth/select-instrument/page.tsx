@@ -20,6 +20,7 @@ export default function SelectInstrumentPage() {
   const [preferredKey, setPreferredKey] = useState('') // '' = none / actual
   const [teams, setTeams] = useState<AppTeam[]>(['worship'])
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
   const router = useRouter()
 
@@ -64,7 +65,12 @@ export default function SelectInstrumentPage() {
         teams,
         profile_completed_at: new Date().toISOString(),
       })
-      if (error) { setSaving(false); return }
+      if (error) {
+        // W11: a failed save must say so, not silently strand the user
+        setSaving(false)
+        setSaveError(`Couldn't save: ${error.message}. Try again.`)
+        return
+      }
     }
     router.push('/services')
   }
@@ -173,6 +179,7 @@ export default function SelectInstrumentPage() {
           </div>
         </div>
 
+        {saveError && <p className="text-xs text-red-400">{saveError}</p>}
         <button
           onClick={handleSave}
           disabled={!canSave || saving}

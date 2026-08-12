@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import type { PositionedLine } from '@/lib/chords/extract'
 import { parseChordSheet } from '@/lib/chords/parse'
 
@@ -7,7 +7,7 @@ import { parseChordSheet } from '@/lib/chords/parse'
 // uploading and correcting is crowd work; approval remains the quality gate.
 async function requireEditor() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return { supabase, user: null, error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   return { supabase, user, error: null }
 }

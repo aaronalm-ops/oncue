@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 
 export async function GET() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data, error } = await supabase
@@ -18,7 +18,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   // v6: any member can add library songs; bulk DELETE below stays editor-only
 
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
 /** DELETE: bulk-remove songs (versions/sections/links cascade) + their stored PDFs */
 export async function DELETE(request: NextRequest) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Allowlist — a missing profile row must NOT grant access

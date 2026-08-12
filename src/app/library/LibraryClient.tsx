@@ -102,9 +102,8 @@ export default function LibraryClient({ songs: initial, role, pendingUploads, at
     })
     setBulkDeleting(false)
     if (res.ok) {
-      setSongs(prev => prev.filter(s => !selected.has(s.id)))
+      setSongs(prev => prev.filter(s => !selected.has(s.id))) // P3: local, no refresh
       exitSelectMode()
-      router.refresh()
     } else {
       const data = await res.json()
       window.alert(data.error ?? 'Delete failed')

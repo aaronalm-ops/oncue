@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import ChordSheet from '@/components/ChordSheet'
 import { ALL_KEYS, deriveSections, effectiveSectionKeys, keyAtOffset, keyIndex, mapChartSectionsToChords, normalizeSectionLabelFull, semitonesBetween, transposeBody, transposeHint } from '@/lib/chords/format'
@@ -19,6 +20,7 @@ interface Props {
   instrument?: string | null // for the capo / keyboard-transpose hint
   preferredKey?: string | null // global default key; null = actual, no transpose
   chartKeyChanges?: (string | null)[] // index-aligned with chartLabels: mid-song modulations
+  attachHref?: string | null // W9: "add chords" deep link for the empty state
 }
 
 /**
@@ -27,17 +29,20 @@ interface Props {
  * live section is highlighted and kept in view, and the key strip transposes
  * with the user's per-song preference saved — same behaviour everywhere.
  */
-export default function ChordsPane({ songTitle, chartLabels, chords, songScale, initialKey, userId, currentSectionIdx, highContrast, canMapSections = false, instrument = null, preferredKey = null, chartKeyChanges }: Props) {
+export default function ChordsPane({ songTitle, chartLabels, chords, songScale, initialKey, userId, currentSectionIdx, highContrast, canMapSections = false, instrument = null, preferredKey = null, chartKeyChanges, attachHref = null }: Props) {
   const hc = highContrast
   const storedKey = chords?.storedKey ?? null
   const canTranspose = storedKey !== null && keyIndex(storedKey) !== null
   const [overrides, setOverrides] = useState<Record<string, string>>(chords?.sectionMaps ?? {})
 
+  const [mapError, setMapError] = useState<string | null>(null)
   async function saveMapping(chartLabel: string, chordLabel: string) {
     if (!chords) return
     const key = normalizeSectionLabelFull(chartLabel)
+    const previous = overrides[key] // W18: keep for revert
+    setMapError(null)
     setOverrides(prev => ({ ...prev, [key]: chordLabel })) // optimistic — applies immediately
-    await fetch('/api/library/section-maps', {
+    const res = await fetch('/api/library/section-maps', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -45,7 +50,17 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
         chart_label: chartLabel,
         chord_section_label: chordLabel,
       }),
-    })
+    }).catch(() => null)
+    if (!res || !res.ok) {
+      // W18: optimistic UI must roll back when the save didn't stick
+      setOverrides(prev => {
+        const next = { ...prev }
+        if (previous === undefined) delete next[key]
+        else next[key] = previous
+        return next
+      })
+      setMapError(`Couldn't save the "${chartLabel}" mapping — try again`)
+    }
   }
 
   const [targetKey, setTargetKey] = useState<string>(() => {
@@ -72,8 +87,14 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
     localStorage.setItem('oncue-chord-size', String(v))
   }
 
+  // W10: is a personal key pinned, or are we following the chart? "Auto"
+  // DELETES the pref row (the old reset SAVED the sheet key as a pref —
+  // sticky forever). Auto = this song always opens in the chart's key again.
+  const [prefPinned, setPrefPinned] = useState(initialKey !== null)
+
   function selectKey(k: string) {
     setTargetKey(k)
+    setPrefPinned(true)
     if (!chords) return
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
@@ -86,6 +107,21 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
         )
         .then(() => {})
     }, 500)
+  }
+
+  function selectAutoKey() {
+    const fallback = songScale && keyIndex(songScale) !== null ? songScale : (storedKey ?? '')
+    setTargetKey(fallback)
+    setPrefPinned(false)
+    if (!chords) return
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    if (!supabaseRef.current) supabaseRef.current = createClient()
+    supabaseRef.current
+      .from('user_scale_preferences')
+      .delete()
+      .eq('user_id', userId)
+      .eq('library_song_id', chords.librarySongId)
+      .then(() => {})
   }
 
   const mapped = useMemo(
@@ -135,10 +171,17 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
 
   if (!chords) {
     return (
-      <div className="py-16 text-center">
+      <div className="py-16 text-center space-y-4">
         <p className={`text-sm ${hc ? 'text-zinc-500' : 'text-zinc-600'}`}>
           No chords linked for &ldquo;{songTitle}&rdquo; yet.
         </p>
+        {/* W9: same one-tap add-chords path as the service page rows */}
+        {attachHref && (
+          <Link href={attachHref}
+            className="inline-block rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white active:scale-95 transition-transform">
+            Add chords for this song →
+          </Link>
+        )}
       </div>
     )
   }
@@ -171,12 +214,23 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
             <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-widest mr-1 ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>
               Key
             </span>
+            <button
+              onClick={selectAutoKey}
+              title="Follow the chart's key (clears your saved key for this song)"
+              className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold transition-all active:scale-95 ${
+                !prefPinned
+                  ? 'bg-purple-600 text-white'
+                  : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
+              }`}
+            >
+              Auto
+            </button>
             {ALL_KEYS.map(k => (
               <button
                 key={k}
                 onClick={() => selectKey(k)}
                 className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold transition-all active:scale-95 ${
-                  k === targetKey
+                  k === targetKey && prefPinned
                     ? 'bg-purple-600 text-white'
                     : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
                 }`}
@@ -224,6 +278,8 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
           )}
         </div>
       )}
+
+      {mapError && <p className="mb-2 text-[11px] text-red-400">{mapError}</p>}
 
       {/* Sections in chart order — index-aligned with the conductor's chart */}
       <div className="space-y-2">

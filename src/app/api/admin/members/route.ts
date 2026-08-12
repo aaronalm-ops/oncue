@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import { TEAMS, type AppRole, type AppTeam } from '@/lib/types'
 
@@ -16,7 +16,7 @@ function canChangeRole(actorRole: AppRole, targetRole: AppRole, newRole: AppRole
 
 export async function PATCH(request: NextRequest) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data: actorProfile } = await supabase.from('profiles').select('role').eq('id', user.id).single()
@@ -60,7 +60,7 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { data: actorProfile } = await supabase.from('profiles').select('role').eq('id', user.id).single()

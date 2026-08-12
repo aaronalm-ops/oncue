@@ -1,12 +1,12 @@
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import AdminClient from './AdminClient'
 import type { AppRole, AppTeam } from '@/lib/types'
 
 export default async function AdminPage() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) redirect('/auth/login')
 
   const { data: profile } = await supabase

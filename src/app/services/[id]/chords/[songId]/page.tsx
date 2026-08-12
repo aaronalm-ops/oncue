@@ -1,6 +1,6 @@
 import { redirect, notFound } from 'next/navigation'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
 import { effectiveSectionKeys, reorderBodyToChart } from '@/lib/chords/format'
 import { canSeeChords } from '@/lib/chords/access'
@@ -14,7 +14,7 @@ import { normTitle } from '@/lib/chords/service-chords'
 export default async function ServiceSongChordsPage({ params }: { params: Promise<{ id: string; songId: string }> }) {
   const { id, songId } = await params
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) redirect('/auth/login')
 
   // Gated to editors until the parser rollout opens chords to everyone
@@ -72,11 +72,18 @@ export default async function ServiceSongChordsPage({ params }: { params: Promis
   const version = versions?.[0] ?? null
 
   if (!librarySongId || !version) {
+    // W17: don't just describe the gap — hand over the one-tap attach flow
     return (
       <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center gap-3 px-6 text-center">
         <p className="font-semibold">No reviewed chords for “{song.title}” yet.</p>
-        <p className="text-sm text-zinc-500">Upload and approve them in the Chords Library.</p>
-        <Link href={`/services/${id}`} className="text-purple-400 text-sm mt-2">← Back to service</Link>
+        <p className="text-sm text-zinc-500">Add them now — they link back to this service automatically.</p>
+        <Link
+          href={`/library?attachSong=${songId}&attachService=${id}&attachTitle=${encodeURIComponent(song.title)}`}
+          className="mt-2 rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold text-white active:scale-95 transition-transform"
+        >
+          Add chords for this song →
+        </Link>
+        <Link href={`/services/${id}`} className="text-purple-400 text-sm mt-1">← Back to service</Link>
       </div>
     )
   }

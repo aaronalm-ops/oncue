@@ -1,4 +1,4 @@
-const CACHE = 'oncue-v7'
+const CACHE = 'oncue-v8'
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -46,6 +46,35 @@ self.addEventListener('fetch', e => {
         return res
       }))
     )
+    return
+  }
+
+  // P6 — navigations: network-first with a 2.5s patience window. If the
+  // network is slow and we hold a recent copy, show it instantly; the fetch
+  // keeps running in the background and refreshes the cache for next time.
+  if (request.mode === 'navigate') {
+    e.respondWith((async () => {
+      const cachedPromise = caches.match(request)
+      const networkPromise = fetch(request).then(res => {
+        if (res.ok) {
+          const clone = res.clone()
+          caches.open(CACHE).then(cache => cache.put(request, clone))
+        }
+        return res
+      })
+      const winner = await Promise.race([
+        networkPromise.catch(() => 'error'),
+        new Promise(resolve => setTimeout(() => resolve('timeout'), 2500)),
+      ])
+      if (winner !== 'timeout' && winner !== 'error') return winner
+      const cached = await cachedPromise
+      if (cached) {
+        networkPromise.catch(() => {}) // background refresh continues
+        return cached
+      }
+      // nothing cached — wait out the network after all
+      return networkPromise.catch(() => Response.error())
+    })())
     return
   }
 

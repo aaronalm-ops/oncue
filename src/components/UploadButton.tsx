@@ -1,6 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
 export default function UploadButton() {
@@ -8,6 +9,8 @@ export default function UploadButton() {
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null)
   const [errors, setErrors] = useState<string[]>([])
   const [notices, setNotices] = useState<string[]>([])
+  // W6: a successful merge should hand you the next step, not a silent refresh
+  const [successes, setSuccesses] = useState<{ name: string; serviceId: string; songs: number; merged: boolean }[]>([])
   const router = useRouter()
 
   async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
@@ -16,8 +19,10 @@ export default function UploadButton() {
 
     setErrors([])
     setNotices([])
+    setSuccesses([])
     const errs: string[] = []
     const notes: string[] = []
+    const oks: typeof successes = []
 
     for (let i = 0; i < files.length; i++) {
       setProgress({ current: i + 1, total: files.length })
@@ -31,11 +36,11 @@ export default function UploadButton() {
       if (!res.ok) {
         errs.push(`${files[i].name}: ${data.error ?? 'Upload failed'}`)
       } else {
-        if (data.replaced) {
-          notes.push(
-            `${files[i].name}: replaced the existing chart for that date` +
-            (data.notes_restored > 0 ? ` (${data.notes_restored} personal note${data.notes_restored === 1 ? '' : 's'} preserved)` : '')
-          )
+        if (data.service_id) {
+          oks.push({ name: files[i].name, serviceId: data.service_id, songs: data.songs ?? 0, merged: !!data.replaced })
+        }
+        if (data.replaced && data.notes_restored > 0) {
+          notes.push(`${files[i].name}: ${data.notes_restored} personal note${data.notes_restored === 1 ? '' : 's'} preserved`)
         }
         if (data.warning) notes.push(`${files[i].name}: ${data.warning}`)
       }
@@ -46,6 +51,7 @@ export default function UploadButton() {
 
     if (errs.length) setErrors(errs)
     if (notes.length) setNotices(notes)
+    setSuccesses(oks)
     router.refresh()
   }
 
@@ -72,6 +78,18 @@ export default function UploadButton() {
             : 'Uploading…'
           : 'Upload chart'}
       </button>
+      {successes.length > 0 && (
+        <div className="mt-1 space-y-0.5">
+          {successes.map((s, i) => (
+            <p key={i} className="text-xs text-green-400">
+              {s.merged ? 'Chart merged' : 'Chart uploaded'} ({s.songs} songs) —{' '}
+              <Link href={`/services/${s.serviceId}`} className="underline underline-offset-2 font-semibold">
+                view service →
+              </Link>
+            </p>
+          ))}
+        </div>
+      )}
       {errors.length > 0 && (
         <div className="mt-1 space-y-0.5">
           {errors.map((err, i) => (

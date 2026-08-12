@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 
 interface SearchRow {
   id: string
@@ -16,7 +16,7 @@ interface SearchRow {
  */
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const q = (request.nextUrl.searchParams.get('q') ?? '').trim()

@@ -330,7 +330,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center gap-4 px-6 text-center">
         <p className="text-white font-semibold">No songs found in this service.</p>
-        <p className="text-zinc-500 text-sm">The chart may have been parsed incorrectly. Delete it and re-upload.</p>
+        <p className="text-zinc-500 text-sm">The chart may have been parsed incorrectly — an admin can delete and re-upload it.</p>
         <Link href={`/services/${serviceId}`} className="text-purple-400 text-sm mt-2">← Back to the service</Link>
       </div>
     )
@@ -580,6 +580,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
               songTitle={currentSong.title}
               chartLabels={currentSong.sections.map(s => s.label)}
               chartKeyChanges={currentSong.sections.map(s => s.key_change ?? null)}
+              attachHref={`/library?attachSong=${currentSong.id}&attachService=${serviceId}&attachTitle=${encodeURIComponent(currentSong.title)}`}
               chords={chordsBySongId[currentSong.id] ?? null}
               songScale={currentSong.scale}
               initialKey={

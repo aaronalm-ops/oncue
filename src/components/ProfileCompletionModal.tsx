@@ -30,6 +30,7 @@ export default function ProfileCompletionModal({ userId, instrument, initialName
   const [preferredKey, setPreferredKey] = useState('') // '' = actual
   const [teams, setTeams] = useState<AppTeam[]>(initialTeams.length ? initialTeams : ['worship'])
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const router = useRouter()
 
   if (dismissed) return null
@@ -47,6 +48,7 @@ export default function ProfileCompletionModal({ userId, instrument, initialName
 
   async function save() {
     setSaving(true)
+    setSaveError(null)
     const supabase = createClient()
     const { error } = await supabase.from('profiles').update({
       display_name: name.trim() || null,
@@ -55,7 +57,11 @@ export default function ProfileCompletionModal({ userId, instrument, initialName
       profile_completed_at: new Date().toISOString(),
     }).eq('id', userId)
     setSaving(false)
-    if (error) return
+    if (error) {
+      // W11: surface the failure instead of quietly staying open
+      setSaveError(`Couldn't save: ${error.message}. Try again.`)
+      return
+    }
     setDismissed(true)
     router.refresh()
   }
@@ -115,6 +121,7 @@ export default function ProfileCompletionModal({ userId, instrument, initialName
           </div>
         </div>
 
+        {saveError && <p className="text-xs text-red-400">{saveError}</p>}
         <div className="flex gap-2 pt-1">
           <button onClick={later} className="flex-1 py-3 rounded-xl bg-zinc-800 text-zinc-300 text-sm font-medium">
             Later

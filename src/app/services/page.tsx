@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import Logo from '@/components/Logo'
 import UploadButton from '@/components/UploadButton'
 import UserMenu from '@/components/UserMenu'
@@ -10,7 +10,7 @@ import type { AppRole, AppTeam } from '@/lib/types'
 export default async function ServicesPage() {
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   const { data: profile } = await supabase
     .from('profiles').select('role, instrument, display_name, teams, profile_completed_at').eq('id', user!.id).single()
   const role = (profile?.role ?? 'member') as AppRole
@@ -25,6 +25,7 @@ export default async function ServicesPage() {
     .from('services')
     .select('id, service_date, day_of_week, source_filename, worship_leader_id')
     .order('service_date', { ascending: false })
+    .limit(50) // P7: ~6 months of history is plenty for the list
 
   // Worship leader names for the list avatars (safe public directory view)
   const leaderIds = [...new Set(

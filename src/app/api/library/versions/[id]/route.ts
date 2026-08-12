@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { deriveSections } from '@/lib/chords/format'
 
 // Chord contributions are open to every signed-in member (v6)
 async function requireEditor() {
   const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getAuthUser(supabase)
   if (!user) return { supabase, error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
   return { supabase, error: null }
 }

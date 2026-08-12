@@ -266,7 +266,7 @@ export default function ChordUploadQueue({ initialUploads, librarySongs, attachI
       router.push(`/library/${data.library_song_id}/version/${data.version_id}`)
       return
     }
-    router.refresh()
+    // P3: no refresh — onConfirmed already updated the list optimistically
   }
 
   async function discard(card: CardState) {

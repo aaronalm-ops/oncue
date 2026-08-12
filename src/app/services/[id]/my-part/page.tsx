@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import MyPartClient from './MyPartClient'
 import { fetchServiceChords } from '@/lib/chords/service-chords'
@@ -8,31 +8,25 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
   const { id } = await params
   const supabase = await createClient()
 
-  const { data: { user } } = await supabase.auth.getUser()
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('instrument, role, preferred_key')
-    .eq('id', user!.id)
-    .single()
+  const user = await getAuthUser(supabase) // local JWT validation (P1)
 
-  const { data: service } = await supabase
-    .from('services')
-    .select('id, service_date, day_of_week, instruments')
-    .eq('id', id)
-    .single()
+  // P2: profile, service, and songs are independent — one parallel stage
+  const [{ data: profile }, { data: service }, songsRes] = await Promise.all([
+    supabase.from('profiles').select('instrument, role, preferred_key').eq('id', user!.id).single(),
+    supabase.from('services').select('id, service_date, day_of_week, instruments').eq('id', id).single(),
+    supabase
+      .from('songs')
+      .select(`
+        id, order_index, title, scale, medley_group, reference_links, in_chart,
+        sections (
+          id, order_index, label, comments, key_change,
+          instructions ( id, instrument, text, is_intro )
+        )
+      `)
+      .eq('service_id', id)
+      .order('order_index'),
+  ])
   if (!service) notFound()
-
-  const songsRes = await supabase
-    .from('songs')
-    .select(`
-      id, order_index, title, scale, medley_group, reference_links, in_chart,
-      sections (
-        id, order_index, label, comments, key_change,
-        instructions ( id, instrument, text, is_intro )
-      )
-    `)
-    .eq('service_id', id)
-    .order('order_index')
 
   // v5 migration (in_chart) not applied yet? Degrade gracefully.
   const songs = songsRes.error
@@ -60,25 +54,26 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
       })),
   }))
 
+  // P2: personal notes and the chords resolver are independent — stage two
   const sectionIds = sortedSongs.flatMap(s => s.sections.map(sec => sec.id))
-  const { data: notes } = sectionIds.length
-    ? await supabase
-        .from('user_notes')
-        .select('id, section_id, instrument, note_text')
-        .eq('user_id', user!.id)
-        .in('section_id', sectionIds)
-    : { data: [] }
+  const [{ data: notes }, chords] = await Promise.all([
+    sectionIds.length
+      ? supabase
+          .from('user_notes')
+          .select('id, section_id, instrument, note_text')
+          .eq('user_id', user!.id)
+          .in('section_id', sectionIds)
+      : Promise.resolve({ data: [] as { id: string; section_id: string; instrument: string; note_text: string }[] }),
+    canSeeChords(profile?.role)
+      ? fetchServiceChords(supabase, sortedSongs, user!.id)
+      : Promise.resolve({ chordsBySongId: {}, prefsByLibraryId: {} }),
+  ])
 
   // Validate user's preferred instrument against what this service actually has
   const profileInstrument = profile?.instrument ?? null
   const validatedInstrument = profileInstrument && service.instruments.includes(profileInstrument)
     ? profileInstrument
     : (service.instruments[0] ?? null)
-
-  // Chords pane data — gated to editors until the parser rollout opens
-  const chords = canSeeChords(profile?.role)
-    ? await fetchServiceChords(supabase, sortedSongs, user!.id)
-    : { chordsBySongId: {}, prefsByLibraryId: {} }
 
   const isEditor = true // v6: any member can map sections
 
