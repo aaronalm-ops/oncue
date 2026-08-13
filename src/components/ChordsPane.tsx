@@ -75,9 +75,12 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
   const currentRef = useRef<HTMLDivElement | null>(null)
 
   // Chord text size — per-device, shared across My Part / Live / full sheets.
-  // Kept out of the way: an "Aa" chip reveals the slider only when wanted.
+  // Primary control is PINCH on the sheet itself; the floating-button sheet
+  // carries a slider as the non-touch fallback.
   const [textScale, setTextScale] = useState(1)
-  const [sizeOpen, setSizeOpen] = useState(false)
+  const textScaleRef = useRef(1)
+  useEffect(() => { textScaleRef.current = textScale }, [textScale])
+  const [sheetOpen, setSheetOpen] = useState(false)
   useEffect(() => {
     const s = parseFloat(localStorage.getItem('oncue-chord-size') ?? '')
     if (Number.isFinite(s) && s >= 0.8 && s <= 1.5) setTextScale(s)
@@ -86,6 +89,42 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
     setTextScale(v)
     localStorage.setItem('oncue-chord-size', String(v))
   }
+
+  // Pinch-to-resize on the chord sheet (two fingers) — natural on phones,
+  // never fights one-finger scrolling or the pane swipe.
+  const paneRef = useRef<HTMLDivElement | null>(null)
+  const pinchRef = useRef<{ d0: number; s0: number } | null>(null)
+  useEffect(() => {
+    const el = paneRef.current
+    if (!el) return
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) pinchRef.current = { d0: dist(e.touches), s0: textScaleRef.current }
+    }
+    const onMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && pinchRef.current) {
+        e.preventDefault() // keep the browser/page from zooming or swiping
+        const next = Math.min(1.5, Math.max(0.8, pinchRef.current.s0 * (dist(e.touches) / pinchRef.current.d0)))
+        setTextScale(Math.round(next * 100) / 100)
+      }
+    }
+    const onEnd = () => {
+      if (pinchRef.current) {
+        localStorage.setItem('oncue-chord-size', String(textScaleRef.current))
+        pinchRef.current = null
+      }
+    }
+    el.addEventListener('touchstart', onStart, { passive: true })
+    el.addEventListener('touchmove', onMove, { passive: false })
+    el.addEventListener('touchend', onEnd)
+    el.addEventListener('touchcancel', onEnd)
+    return () => {
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchmove', onMove)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onEnd)
+    }
+  }, [])
 
   // W10: is a personal key pinned, or are we following the chart? "Auto"
   // DELETES the pref row (the old reset SAVED the sheet key as a pref —
@@ -193,7 +232,7 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
   const hint = transposeHint(actualKey, shownKey, instrument)
 
   return (
-    <div>
+    <div ref={paneRef}>
       {/* Capo / keyboard-transpose hint */}
       {hint && hint.value !== 0 && (
         <div className="mb-2.5 flex items-center gap-2">
@@ -207,77 +246,8 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
           </span>
         </div>
       )}
-      {/* Key strip + text-size chip (chip stays fixed while keys scroll) */}
-      <div className="mb-3 flex items-center gap-2">
-        {canTranspose ? (
-          <div className="-mx-1 px-1 flex-1 min-w-0 flex items-center gap-1 overflow-x-auto no-scrollbar">
-            <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-widest mr-1 ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>
-              Key
-            </span>
-            <button
-              onClick={selectAutoKey}
-              title="Follow the chart's key (clears your saved key for this song)"
-              className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold transition-all active:scale-95 ${
-                !prefPinned
-                  ? 'bg-purple-600 text-white'
-                  : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
-              }`}
-            >
-              Auto
-            </button>
-            {ALL_KEYS.map(k => (
-              <button
-                key={k}
-                onClick={() => selectKey(k)}
-                className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-bold transition-all active:scale-95 ${
-                  k === targetKey && prefPinned
-                    ? 'bg-purple-600 text-white'
-                    : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
-                }`}
-              >
-                {k}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="flex-1" />
-        )}
-        <button
-          onClick={() => setSizeOpen(o => !o)}
-          aria-label="Chord text size"
-          title="Chord text size"
-          className={`shrink-0 rounded-lg px-2 py-1 text-xs font-bold transition-colors ${
-            sizeOpen || textScale !== 1
-              ? 'bg-purple-600 text-white'
-              : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
-          }`}
-        >
-          Aa
-        </button>
-      </div>
-
-      {/* Size slider — only while open, one slim row */}
-      {sizeOpen && (
-        <div className={`mb-3 flex items-center gap-3 rounded-xl border px-3 py-2 ${
-          hc ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-900 border-zinc-800'
-        }`}>
-          <span className={`shrink-0 text-[10px] font-bold ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>A</span>
-          <input
-            type="range" min="0.8" max="1.5" step="0.05"
-            value={textScale}
-            onChange={e => changeScale(parseFloat(e.target.value))}
-            className="flex-1 accent-purple-600"
-            aria-label="Chord text size slider"
-          />
-          <span className={`shrink-0 text-base font-bold ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>A</span>
-          {textScale !== 1 && (
-            <button onClick={() => changeScale(1)}
-              className={`shrink-0 text-[10px] font-semibold px-2 py-1 rounded-lg ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
-              Reset
-            </button>
-          )}
-        </div>
-      )}
+      {/* Key + size moved into the floating button below — the sheet content
+          starts immediately, and two-finger pinch resizes the text. */}
 
       {mapError && <p className="mb-2 text-[11px] text-red-400">{mapError}</p>}
 
@@ -352,6 +322,98 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
           </div>
         )}
       </div>
+
+      {/* Floating key button — one compact affordance instead of a strip of
+          14 chips eating the top of the pane. Shows the current key at a
+          glance; opens the sheet with key grid + size slider. */}
+      <button
+        onClick={() => setSheetOpen(true)}
+        aria-label="Key and text size"
+        className={`fixed right-3 z-30 h-11 min-w-11 px-3 rounded-full border shadow-lg flex items-center gap-1.5 active:scale-95 transition-transform ${
+          hc ? 'bg-white/95 border-zinc-300' : 'bg-zinc-900/95 border-zinc-700'
+        }`}
+        style={{ bottom: '186px' }}
+      >
+        <span className={`text-[9px] font-bold uppercase tracking-widest ${hc ? 'text-zinc-500' : 'text-zinc-500'}`}>Key</span>
+        <span className={`text-sm font-black ${hc ? 'text-black' : 'text-white'}`}>
+          {canTranspose ? (prefPinned ? (shownKey ?? '—') : 'Auto') : '—'}
+        </span>
+      </button>
+
+      {sheetOpen && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/60" onClick={() => setSheetOpen(false)} />
+          <div className={`fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t p-4 pb-8 ${
+            hc ? 'bg-white border-zinc-300' : 'bg-zinc-900 border-zinc-700'
+          }`}>
+            <div className="max-w-lg mx-auto space-y-4">
+              {canTranspose && (
+                <div>
+                  <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${hc ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                    Key
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      onClick={() => { selectAutoKey(); setSheetOpen(false) }}
+                      title="Follow the chart's key (clears your saved key for this song)"
+                      className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all active:scale-95 ${
+                        !prefPinned
+                          ? 'bg-purple-600 text-white'
+                          : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
+                      }`}
+                    >
+                      Auto
+                    </button>
+                    {ALL_KEYS.map(k => (
+                      <button
+                        key={k}
+                        onClick={() => { selectKey(k); setSheetOpen(false) }}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all active:scale-95 ${
+                          k === targetKey && prefPinned
+                            ? 'bg-purple-600 text-white'
+                            : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
+                        }`}
+                      >
+                        {k}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <p className={`text-[10px] font-bold uppercase tracking-widest mb-2 ${hc ? 'text-zinc-500' : 'text-zinc-500'}`}>
+                  Text size — or pinch the sheet with two fingers
+                </p>
+                <div className="flex items-center gap-3">
+                  <span className={`shrink-0 text-[10px] font-bold ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>A</span>
+                  <input
+                    type="range" min="0.8" max="1.5" step="0.05"
+                    value={textScale}
+                    onChange={e => changeScale(parseFloat(e.target.value))}
+                    className="flex-1 accent-purple-600"
+                    aria-label="Chord text size"
+                  />
+                  <span className={`shrink-0 text-base font-bold ${hc ? 'text-zinc-600' : 'text-zinc-500'}`}>A</span>
+                  {textScale !== 1 && (
+                    <button onClick={() => changeScale(1)}
+                      className={`shrink-0 text-[10px] font-semibold px-2 py-1 rounded-lg ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setSheetOpen(false)}
+                className={`w-full py-2.5 rounded-xl text-sm font-semibold ${hc ? 'bg-zinc-200 text-zinc-700' : 'bg-zinc-800 text-zinc-300'}`}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

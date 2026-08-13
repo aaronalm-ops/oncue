@@ -19,6 +19,7 @@ interface Props {
   song: { id: string; title: string; artist: string | null }
   versions: Version[]
   canManage: boolean
+  canDelete?: boolean // leaders+ can remove a whole song (dupes, dead entries)
   userId: string
   perSongKey: string | null // saved per-song preference (overrides global)
   globalPreferredKey: string | null // profile default; null = actual
@@ -27,7 +28,7 @@ interface Props {
   sharedLiveNow: boolean
 }
 
-export default function SongDetailClient({ song, versions: versionsProp, canManage, userId, perSongKey, globalPreferredKey, instrument, todayServiceId, sharedLiveNow }: Props) {
+export default function SongDetailClient({ song, versions: versionsProp, canManage, canDelete = false, userId, perSongKey, globalPreferredKey, instrument, todayServiceId, sharedLiveNow }: Props) {
   // P3: local copies instead of router.refresh() round-trips; kept in sync
   // with the server prop so refreshes from elsewhere still win. Lazy-loaded
   // chord bodies are preserved across prop syncs.
@@ -141,6 +142,25 @@ export default function SongDetailClient({ song, versions: versionsProp, canMana
     if (res.ok) setVersions(prev => prev.filter(v => v.id !== id)) // instant, no refresh
   }
 
+  const [deletingSong, setDeletingSong] = useState(false)
+  /** Whole-song delete (leaders+) — the missing exit for duplicate or dead
+   *  entries; versions, PDFs, and service links cascade via the bulk API. */
+  async function deleteSong() {
+    if (!window.confirm(`Delete "${display.title}" and all its chord versions? Stored PDFs and links from services are removed too. This cannot be undone.`)) return
+    setDeletingSong(true)
+    const res = await fetch('/api/library/songs', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [song.id] }),
+    })
+    setDeletingSong(false)
+    if (res.ok) router.push('/library')
+    else {
+      const data = await res.json().catch(() => ({}))
+      window.alert(data.error ?? 'Delete failed')
+    }
+  }
+
   return (
     <div className="min-h-screen bg-black text-white">
       <div className="max-w-lg mx-auto px-4 pt-10 pb-24">
@@ -192,6 +212,15 @@ export default function SongDetailClient({ song, versions: versionsProp, canMana
               aria-label="Edit song name">
               <svg className="w-3.5 h-3.5 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+          )}
+          {canDelete && !editingMeta && (
+            <button onClick={deleteSong} disabled={deletingSong}
+              className="w-8 h-8 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0 active:bg-red-950 transition-colors disabled:opacity-50"
+              aria-label="Delete song">
+              <svg className="w-3.5 h-3.5 text-red-400/80" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
             </button>
           )}

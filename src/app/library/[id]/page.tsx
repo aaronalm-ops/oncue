@@ -65,6 +65,7 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
       song={{ id: song.id, title: song.title, artist: song.artist }}
       versions={versions}
       canManage={canManage}
+      canDelete={role !== 'member'}
       userId={user.id}
       perSongKey={pref?.preferred_key ?? null}
       globalPreferredKey={(profile as { preferred_key?: string | null } | null)?.preferred_key ?? null}
