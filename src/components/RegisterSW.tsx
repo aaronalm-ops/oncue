@@ -11,7 +11,7 @@ declare global {
 
 export default function RegisterSW() {
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null)
-  const [showIOSHint, setShowIOSHint] = useState(false)
+  const [iosHint, setIosHint] = useState<'safari' | 'other' | null>(null)
   const [showSamsungHint, setShowSamsungHint] = useState(false)
   const [dismissed, setDismissed] = useState(false)
 
@@ -23,11 +23,37 @@ export default function RegisterSW() {
     // Already running as installed PWA — hide banner
     if (window.matchMedia('(display-mode: standalone)').matches) return
 
+    const ua = navigator.userAgent
+    const nav = navigator as Navigator & { standalone?: boolean }
+
+    // --- iOS first ---------------------------------------------------------
+    // No iOS browser ever fires beforeinstallprompt (they are all WebKit), so
+    // the manual hint is the ONLY install affordance iOS users get. It has to
+    // fire for every browser on the platform, not just Safari.
+    //
+    // iPadOS 13+ Safari reports itself as "Macintosh" by default (desktop-class
+    // browsing), so the classic /ipad/ sniff misses every iPad. maxTouchPoints
+    // is the standard workaround.
+    const isIOS =
+      /iphone|ipad|ipod/i.test(ua) ||
+      (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1)
+
+    if (isIOS) {
+      // navigator.standalone covers pre-16.4 installs that predate display-mode
+      if (nav.standalone === true) return
+      // Chrome (CriOS), Firefox (FxiOS), Edge (EdgiOS), Opera (OPiOS) all put
+      // "Add to Home Screen" behind the Share button too, but it sits next to
+      // the address bar rather than in the bottom toolbar.
+      const isSafari = !/crios|fxios|edgios|opios|chrome/i.test(ua)
+      setIosHint(isSafari ? 'safari' : 'other')
+      return
+    }
+
+    // --- Android / desktop -------------------------------------------------
     // Samsung Internet mints WebAPKs that Google Play Protect blocks as
     // "unsafe" ("built for an older version of Android"), and its
     // "Install anyway" often fails silently. Known Samsung-wide issue —
     // route these users to Chrome, which installs cleanly.
-    const ua = navigator.userAgent
     if (/SamsungBrowser/i.test(ua)) {
       setShowSamsungHint(true)
       return
@@ -46,12 +72,6 @@ export default function RegisterSW() {
     }
     window.addEventListener('beforeinstallprompt', handler)
 
-    // iOS Safari — no beforeinstallprompt, show manual hint
-    const isIOS = /iphone|ipad|ipod/i.test(ua)
-    const isInWebAppiOS = (navigator as Navigator & { standalone?: boolean }).standalone === true
-    const isSafari = /safari/i.test(ua) && !/chrome|crios|fxios/i.test(ua)
-    if (isIOS && isSafari && !isInWebAppiOS) setShowIOSHint(true)
-
     return () => window.removeEventListener('beforeinstallprompt', handler)
   }, [])
 
@@ -64,6 +84,14 @@ export default function RegisterSW() {
   }
 
   if (dismissed) return null
+
+  const DismissButton = (
+    <button onClick={() => setDismissed(true)} className="text-zinc-600 p-1 shrink-0" aria-label="Dismiss">
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  )
 
   if (showSamsungHint) {
     return (
@@ -78,11 +106,7 @@ export default function RegisterSW() {
               Samsung&rsquo;s browser can&rsquo;t install apps right now (a known Samsung issue). Use Chrome instead.
             </p>
           </div>
-          <button onClick={() => setDismissed(true)} className="text-zinc-600 p-1 shrink-0" aria-label="Dismiss">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          {DismissButton}
         </div>
         <button
           onClick={openInChrome}
@@ -103,11 +127,7 @@ export default function RegisterSW() {
           <p className="text-white text-sm font-semibold">Install OnCue</p>
           <p className="text-zinc-400 text-xs">Add to your home screen</p>
         </div>
-        <button onClick={() => setDismissed(true)} className="text-zinc-600 p-1" aria-label="Dismiss">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        {DismissButton}
         <button
           onClick={async () => {
             await installEvent.prompt()
@@ -120,7 +140,7 @@ export default function RegisterSW() {
     )
   }
 
-  if (showIOSHint) {
+  if (iosHint) {
     return (
       <div className="fixed bottom-4 left-4 right-4 z-50 bg-zinc-900 border border-purple-800 rounded-2xl px-4 py-3 shadow-xl shadow-purple-950/40">
         <div className="flex items-start gap-3">
@@ -129,16 +149,20 @@ export default function RegisterSW() {
           </div>
           <div className="flex-1">
             <p className="text-white text-sm font-semibold">Install OnCue</p>
-            <p className="text-zinc-400 text-xs mt-0.5">
-              Tap the <span className="text-white">Share</span> button below, then{' '}
-              <span className="text-white">&ldquo;Add to Home Screen&rdquo;</span>
-            </p>
+            {iosHint === 'safari' ? (
+              <p className="text-zinc-400 text-xs mt-0.5">
+                Tap the <span className="text-white">Share</span> button at the bottom of Safari, then{' '}
+                <span className="text-white">&ldquo;Add to Home Screen&rdquo;</span>
+              </p>
+            ) : (
+              <p className="text-zinc-400 text-xs mt-0.5">
+                Tap the <span className="text-white">Share</span> button next to the address bar, then{' '}
+                <span className="text-white">&ldquo;Add to Home Screen&rdquo;</span>. You&rsquo;ll need to sign in
+                once more inside the installed app.
+              </p>
+            )}
           </div>
-          <button onClick={() => setDismissed(true)} className="text-zinc-600 p-1 shrink-0" aria-label="Dismiss">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          {DismissButton}
         </div>
       </div>
     )
