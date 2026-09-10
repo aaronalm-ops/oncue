@@ -39,7 +39,10 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
     user
       ? supabase.from('profiles').select('role').eq('id', user.id).single()
       : Promise.resolve({ data: null }),
-    supabase.from('public_profiles').select('id, display_name, role').order('display_name', { ascending: true }),
+    // public_profiles exposes id/display_name/instrument/teams — it has NO role
+    // column (see v9). Selecting one made this query error out, which left the
+    // picker with zero options and no way to assign a leader at all.
+    supabase.from('public_profiles').select('id, display_name, teams').order('display_name', { ascending: true }),
   ])
   const leader = leaderRes.data
   const profile = profileRes.data as { role?: string } | null
@@ -50,7 +53,9 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   const pickerOptions = (leaderOptions ?? []).map(p => ({
     id: p.id as string,
     name: (p.display_name as string | null) || 'Unnamed member',
-    isLeader: p.role === 'worship_leader',
+    // ★ marks the worship team. Role isn't readable here — profiles SELECT is
+    // own-row-or-privileged, so a worship_leader would see an empty list.
+    isLeader: ((p as { teams?: string[] }).teams ?? []).includes('worship'),
   }))
 
   const date = new Date(service.service_date + 'T00:00:00')
@@ -216,7 +221,16 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
                 s.hasChords ? (
                   <Link
                     key={s.id}
-                    href={`/services/${id}/chords/${s.id}`}
+                    // Tapping a song here used to open the standalone chord
+                    // sheet, a dead end — people (including the ones who built
+                    // it) reach for this row when they mean Stage View. It now
+                    // opens Stage View parked on this song, chords pane first,
+                    // so next/prev song and the live flow are right there.
+                    // Songs the chart dropped are filtered out of Stage View
+                    // entirely, so those keep the standalone sheet.
+                    href={s.in_chart === false
+                      ? `/services/${id}/chords/${s.id}`
+                      : `/services/${id}/my-part?song=${s.id}&pane=chords`}
                     className="flex items-center gap-3 bg-zinc-900 rounded-xl px-4 py-3 active:bg-zinc-800 transition-colors border border-zinc-800/50"
                   >
                     <span className="flex-1 min-w-0 text-sm font-medium truncate">{s.title}</span>

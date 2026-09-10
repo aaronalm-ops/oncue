@@ -4,7 +4,13 @@ import MyPartClient from './MyPartClient'
 import { fetchServiceChords } from '@/lib/chords/service-chords'
 import { canSeeChords } from '@/lib/chords/access'
 
-export default async function MyPartPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function MyPartPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
   const { id } = await params
   const supabase = await createClient()
 
@@ -54,19 +60,37 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
       })),
   }))
 
-  // P2: personal notes and the chords resolver are independent — stage two
+  // P2: personal notes and the chords resolver are independent — stage two.
+  // Two note queries, not one .or(): they run inside the same Promise.all so
+  // it costs no extra wall clock, and a hand-built or() filter over two UUID
+  // lists is the kind of string nobody can safely edit later.
   const sectionIds = sortedSongs.flatMap(s => s.sections.map(sec => sec.id))
-  const [{ data: notes }, chords] = await Promise.all([
+  const songIds = sortedSongs.map(s => s.id)
+  type NoteRow = { id: string; section_id: string | null; song_id: string | null; instrument: string; note_text: string }
+  const emptyNotes = Promise.resolve({ data: [] as NoteRow[] })
+  const [{ data: sectionNotes }, { data: songNotes }, chords] = await Promise.all([
     sectionIds.length
       ? supabase
           .from('user_notes')
-          .select('id, section_id, instrument, note_text')
+          .select('id, section_id, song_id, instrument, note_text')
           .eq('user_id', user!.id)
           .in('section_id', sectionIds)
-      : Promise.resolve({ data: [] as { id: string; section_id: string; instrument: string; note_text: string }[] }),
+      : emptyNotes,
+    // v19: notes that belong to the whole song rather than one section — the
+    // only place to put anything on a song the chart hasn't sectioned yet.
+    songIds.length
+      ? supabase
+          .from('user_notes')
+          .select('id, section_id, song_id, instrument, note_text')
+          .eq('user_id', user!.id)
+          .in('song_id', songIds)
+      : emptyNotes,
+    // NOTE: tempo currently rides along with the chords gate. With
+    // CHORDS_OPEN_TO_ALL that is moot; if it is ever flipped off, members would
+    // lose the beat pulse too, which would be wrong — tempo isn't chords.
     canSeeChords(profile?.role)
       ? fetchServiceChords(supabase, sortedSongs, user!.id)
-      : Promise.resolve({ chordsBySongId: {}, prefsByLibraryId: {} }),
+      : Promise.resolve({ chordsBySongId: {}, prefsByLibraryId: {}, tempoBySongId: {} }),
   ])
 
   // Validate user's preferred instrument against what this service actually has
@@ -77,15 +101,31 @@ export default async function MyPartPage({ params }: { params: Promise<{ id: str
 
   const isEditor = true // v6: any member can map sections
 
+  // Deep link from the service page's song list: ?song=<songs.id>&pane=chords.
+  // Resolved here rather than client-side so the right song is in the first
+  // paint — no flash of song 1. An id that isn't in this chart (a song the
+  // chart dropped, so it was filtered out of sortedSongs above) falls back to
+  // the first song rather than erroring.
+  const sp = await searchParams
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? null
+  const wantedSongId = one(sp.song)
+  const foundIdx = wantedSongId ? sortedSongs.findIndex(s => s.id === wantedSongId) : -1
+  const initialSongIdx = foundIdx >= 0 ? foundIdx : 0
+  const initialPane = one(sp.pane) === 'chords' ? 'chords' : 'part'
+
   return (
     <MyPartClient
       serviceId={id}
       songs={sortedSongs}
+      initialSongIdx={initialSongIdx}
+      initialPane={initialPane}
       instruments={service.instruments}
       userInstrument={validatedInstrument}
       userId={user!.id}
-      initialNotes={notes ?? []}
+      initialNotes={(sectionNotes ?? []) as NoteRow[]}
+      initialSongNotes={(songNotes ?? []) as NoteRow[]}
       chordsBySongId={chords.chordsBySongId}
+      tempoBySongId={chords.tempoBySongId}
       prefsByLibraryId={chords.prefsByLibraryId}
       canMapSections={isEditor}
       preferredKey={(profile as { preferred_key?: string | null } | null)?.preferred_key ?? null}

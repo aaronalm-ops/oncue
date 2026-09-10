@@ -159,7 +159,12 @@ export default function LibraryClient({ songs: initial, role, pendingUploads, at
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
             </Link>
-            <h1 className="text-xl font-bold tracking-tight">Chords Library</h1>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight">Chords Library</h1>
+              <p className="text-[11px] text-zinc-600">
+                {songs.length} song{songs.length === 1 ? '' : 's'}
+              </p>
+            </div>
           </div>
           {canManage && (
             <div className="flex items-center gap-2">

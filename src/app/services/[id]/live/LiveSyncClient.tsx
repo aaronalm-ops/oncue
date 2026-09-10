@@ -7,7 +7,7 @@ import ChordsPane from '@/components/ChordsPane'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
 import PulsePrompt from '@/components/PulsePrompt'
 import { usePulsePref } from '@/lib/use-pulse'
-import type { SongChordsData } from '@/lib/chords/service-chords'
+import type { SongChordsData, SongTempoData } from '@/lib/chords/service-chords'
 
 interface ImpromptuShare {
   librarySongId: string
@@ -30,13 +30,15 @@ interface Props {
   initialSongIndex: number
   initialSectionIndex: number
   chordsBySongId: Record<string, SongChordsData>
+  /** Library identity + tempo for every song, chord sheet or not (v19). */
+  tempoBySongId: Record<string, SongTempoData>
   prefsByLibraryId: Record<string, string>
   canMapSections: boolean
   initialImpromptu: ImpromptuShare | null
   preferredKey: string | null // global transpose preference; null = actual
 }
 
-export default function LiveSyncClient({ serviceId, userId, songs, instruments, userInstrument, initialSongIndex, initialSectionIndex, chordsBySongId, prefsByLibraryId, canMapSections, initialImpromptu, preferredKey }: Props) {
+export default function LiveSyncClient({ serviceId, userId, songs, instruments, userInstrument, initialSongIndex, initialSectionIndex, chordsBySongId, tempoBySongId, prefsByLibraryId, canMapSections, initialImpromptu, preferredKey }: Props) {
   const [songIdx, setSongIdx] = useState(initialSongIndex)
   const [sectionIdx, setSectionIdx] = useState(initialSectionIndex)
   const [highContrast, setHighContrast] = useState(false)
@@ -336,7 +338,12 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     )
   }
 
-  const currentBpm = currentSong ? chordsBySongId[currentSong.id]?.tempoBpm ?? null : null
+  // v19: tempo comes from tempoBySongId, not chordsBySongId. Same bug as in
+  // My Part — a song without a reviewed chord sheet had no tempo here either,
+  // so the pulse silently did nothing for exactly the songs a leader had just
+  // set a tempo on in rehearsal. Live is read-only for tempo; it only needed
+  // the read path fixed.
+  const currentBpm = currentSong ? tempoBySongId[currentSong.id]?.tempoBpm ?? null : null
 
   const myInstruction = currentSection?.instructions.find(i => i.instrument === viewInstrument)
   const isMyIntro = myInstruction?.is_intro ?? false

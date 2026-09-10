@@ -72,7 +72,7 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
       : Promise.resolve(null),
     canSeeChords(profile?.role)
       ? fetchServiceChords(supabase, sortedSongs, user!.id)
-      : Promise.resolve({ chordsBySongId: {}, prefsByLibraryId: {} }),
+      : Promise.resolve({ chordsBySongId: {}, prefsByLibraryId: {}, tempoBySongId: {} }),
   ])
 
   // Impromptu live share: if a library song is being shared right now,
@@ -116,6 +116,7 @@ export default async function LivePage({ params }: { params: Promise<{ id: strin
       initialSongIndex={sessionState?.current_song_index ?? 0}
       initialSectionIndex={sessionState?.current_section_index ?? 0}
       chordsBySongId={chords.chordsBySongId}
+      tempoBySongId={chords.tempoBySongId}
       prefsByLibraryId={chords.prefsByLibraryId}
       canMapSections={isEditor}
       initialImpromptu={initialImpromptu}

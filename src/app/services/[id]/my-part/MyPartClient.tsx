@@ -7,12 +7,17 @@ import ChordsPane from '@/components/ChordsPane'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
 import PulsePrompt from '@/components/PulsePrompt'
 import { usePulsePref } from '@/lib/use-pulse'
-import type { SongChordsData } from '@/lib/chords/service-chords'
+import type { SongChordsData, SongTempoData } from '@/lib/chords/service-chords'
 
 interface Instruction { id: string; instrument: string; text: string; is_intro: boolean }
 interface Section { id: string; order_index: number; label: string; comments: string; key_change?: string | null; instructions: Instruction[] }
 interface Song { id: string; order_index: number; title: string; scale: string | null; medley_group: string | null; reference_links: string[]; sections: Section[] }
-interface UserNote { id: string; section_id: string; instrument: string; note_text: string }
+/** A user_notes row. Exactly one of section_id / song_id is set (v19). */
+interface NoteRow { id: string; section_id: string | null; song_id: string | null; instrument: string; note_text: string }
+
+/** Notes live in one flat map. Section notes key on the section id; whole-song
+ *  notes get a `song:` prefix so the two can never collide. */
+const songNoteKey = (songId: string, instrument: string) => `song:${songId}:${instrument}`
 
 interface Props {
   serviceId: string
@@ -20,11 +25,19 @@ interface Props {
   instruments: string[]
   userInstrument: string | null
   userId: string
-  initialNotes: UserNote[]
+  initialNotes: NoteRow[]
+  /** v19: whole-song notes, for songs the chart hasn't sectioned yet. */
+  initialSongNotes: NoteRow[]
   chordsBySongId: Record<string, SongChordsData>
+  /** Library identity + tempo for every song, chord sheet or not. */
+  tempoBySongId: Record<string, SongTempoData>
   prefsByLibraryId: Record<string, string>
   canMapSections: boolean
   preferredKey: string | null // global transpose preference; null = actual
+  /** Song to open on, resolved server-side from ?song=<id>. Defaults to 0. */
+  initialSongIdx?: number
+  /** Which pane to land on when deep-linked from the service page's chord list. */
+  initialPane?: 'part' | 'chords'
 }
 
 // Extracted to top-level so it never remounts on parent re-render
@@ -218,8 +231,80 @@ function TempoChip({ tempo, canEdit, onSave, hc, dim }: {
   )
 }
 
+/**
+ * A note that belongs to the whole song rather than one section (v19).
+ *
+ * Two shapes, because screen space in stage view is the scarcest thing here
+ * and this card is permanent:
+ *   - sections present, no note yet -> one thin dashed row (~26px)
+ *   - no sections at all, or a note saved -> a full card, same visual language
+ *     as SectionCard so there's nothing new to learn
+ *
+ * ALWAYS available, not only when sections are missing. If it appeared only for
+ * unsectioned songs, a note would silently stop rendering the moment a chart
+ * arrived — right after the rehearsal you wrote it in.
+ */
+function SongNoteCard({ note, isEditing, saving, hc, fg, dim, cardBg, forceCard,
+  onStartEdit, onSaveNote, onCancelEdit, pulseBpm = null }: {
+  note: string | undefined
+  isEditing: boolean
+  saving: boolean
+  hc: boolean; fg: string; dim: string; cardBg: string
+  /** true when the song has no sections — then this is the only card there is */
+  forceCard: boolean
+  onStartEdit: () => void
+  onSaveNote: (text: string) => void
+  onCancelEdit: () => void
+  pulseBpm?: number | null
+}) {
+  if (!(forceCard || note || isEditing)) {
+    return (
+      <button
+        onClick={onStartEdit}
+        className={`w-full flex items-center gap-1.5 rounded-lg border border-dashed px-3 py-1.5 text-[10px] ${
+          hc ? 'border-zinc-300 text-zinc-500' : 'border-zinc-800 text-zinc-600'
+        }`}
+      >
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+        </svg>
+        Note for the whole song
+      </button>
+    )
+  }
+
+  return (
+    <div className={`relative overflow-hidden rounded-xl px-4 py-3 ${cardBg}`}>
+      {pulseBpm !== null && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 bg-amber-500/60"
+          style={{ animation: `oncue-beat ${60 / pulseBpm}s linear infinite` }}
+        />
+      )}
+      <p className={`relative text-sm font-bold uppercase tracking-wide mb-1.5 ${hc ? 'text-zinc-600' : 'text-purple-400'}`}>
+        Whole song
+      </p>
+      {isEditing ? (
+        <NoteEditor initialValue={note ?? ''} onSave={onSaveNote} onCancel={onCancelEdit} hc={hc} saving={saving} />
+      ) : note ? (
+        <button onClick={onStartEdit} className={`relative block w-full text-left text-sm leading-snug ${fg}`}>
+          {note}
+        </button>
+      ) : (
+        <button onClick={onStartEdit} className={`relative flex items-center gap-1 text-[11px] ${dim}`}>
+          <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+          </svg>
+          Add a note — tempo, feel, who leads
+        </button>
+      )}
+    </div>
+  )
+}
+
 function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNote, openNotes,
-  saving, onToggleNote, onStartEdit, onSaveNote, onCancelEdit, compact, tempo, canEditTempo, onSaveTempo,
+  saving, onToggleNote, onStartEdit, onSaveNote, onCancelEdit, onSaveSongNote, tempo, canEditTempo, onSaveTempo,
   pulseOn = false, onTogglePulse }: {
   song: Song
   viewInstrument: string
@@ -232,30 +317,42 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
   onStartEdit: (key: string) => void
   onSaveNote: (sectionId: string, text: string) => void
   onCancelEdit: () => void
-  compact?: boolean
+  onSaveSongNote: (songId: string, text: string) => void
   tempo: number | null
   canEditTempo: boolean
   onSaveTempo: (bpm: number | null) => void
   pulseOn?: boolean
   onTogglePulse?: () => void
 }) {
-  const pulseBpm = pulseOn && !compact && tempo !== null ? tempo : null
+  const bare = song.sections.length === 0
+  const pulseBpm = pulseOn && tempo !== null ? tempo : null
+  // Exactly one set of surfaces pulses: the section cards normally, or the
+  // whole-song card when the chart hasn't sectioned this song. Without this,
+  // decoupling BPM from chord sheets would hand you a tempo you can set and
+  // never see — on a bare song there'd be no card on screen to flash.
+  const sectionPulse = bare ? null : pulseBpm
+  const songCardPulse = bare ? pulseBpm : null
+  const songKey = songNoteKey(song.id, viewInstrument)
   // Key journey when the song modulates: "G → A" (consecutive dupes collapsed)
   const keyJourney = song.sections
     .map(s => s.key_change)
     .filter((k): k is string => !!k)
     .filter((k, i, arr) => i === 0 || arr[i - 1] !== k)
   return (
-    <div className={`space-y-2 ${compact ? 'pt-6' : ''}`}>
+    <div className="space-y-2">
+      {/* min-w-0 + truncate: this row never wraps, and it now always carries a
+          tempo chip. Without the truncate a long title pushed MEDLEY and the
+          reference-track link off a 360px screen — and off the ~half-width
+          Part pane on tablets and unfolded foldables, where it's worse. */}
       <div className="flex items-center gap-2">
-        <span className={`font-bold text-sm ${fg}`}>{song.title}</span>
+        <span className={`font-bold text-sm min-w-0 truncate ${fg}`}>{song.title}</span>
         {song.scale && (
           <span className={`text-xs font-black px-2.5 py-0.5 rounded-lg ${hc ? 'bg-black text-white' : 'bg-purple-600 text-white'}`}>
             {song.scale}{keyJourney.length > 0 ? ` → ${keyJourney.join(' → ')}` : ''}
           </span>
         )}
         <TempoChip tempo={tempo} canEdit={canEditTempo} onSave={onSaveTempo} hc={hc} dim={dim} />
-        {!compact && tempo !== null && onTogglePulse && (
+        {tempo !== null && onTogglePulse && (
           <button
             onClick={onTogglePulse}
             className={`shrink-0 flex items-center rounded-lg px-2 py-1 transition-colors ${
@@ -278,6 +375,18 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
           </a>
         )}
       </div>
+      <SongNoteCard
+        note={notes[songKey]}
+        isEditing={editingNote === songKey}
+        saving={saving}
+        hc={hc} fg={fg} dim={dim} cardBg={cardBg}
+        forceCard={bare}
+        onStartEdit={() => onStartEdit(songKey)}
+        onSaveNote={(text) => onSaveSongNote(song.id, text)}
+        onCancelEdit={onCancelEdit}
+        pulseBpm={songCardPulse}
+      />
+
       {song.sections.map(section => {
         const key = `${section.id}:${viewInstrument}`
         return (
@@ -294,7 +403,7 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
             onStartEdit={() => onStartEdit(key)}
             onSaveNote={(text) => onSaveNote(section.id, text)}
             onCancelEdit={onCancelEdit}
-            pulseBpm={pulseBpm}
+            pulseBpm={sectionPulse}
           />
         )
       })}
@@ -302,16 +411,23 @@ function SongBlock({ song, viewInstrument, hc, fg, dim, cardBg, notes, editingNo
   )
 }
 
-export default function MyPartClient({ serviceId, songs, instruments, userInstrument, userId, initialNotes, chordsBySongId, prefsByLibraryId, canMapSections, preferredKey }: Props) {
+export default function MyPartClient({ serviceId, songs, instruments, userInstrument, userId, initialNotes, initialSongNotes, chordsBySongId, tempoBySongId, prefsByLibraryId, canMapSections, preferredKey, initialSongIdx = 0, initialPane = 'part' }: Props) {
+  // Clamp defensively: songs can shrink between the server render and here.
+  const startIdx = Math.max(0, Math.min(songs.length - 1, initialSongIdx))
   const [viewInstrument, setViewInstrument] = useState(userInstrument ?? instruments[0] ?? '')
-  const [layout, setLayout] = useState<'song' | 'scroll'>('song')
-  const [activeSongIdx, setActiveSongIdx] = useState(0)
+  const [activeSongIdx, setActiveSongIdx] = useState(startIdx)
+  const [instrumentSheet, setInstrumentSheet] = useState(false)
   const [highContrast, setHighContrast] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isLive, setIsLive] = useState(false)
   const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'reconnecting' | 'offline'>('connecting')
   const [notes, setNotes] = useState<Record<string, string>>(
-    Object.fromEntries(initialNotes.map(n => [`${n.section_id}:${n.instrument}`, n.note_text]))
+    Object.fromEntries([
+      ...initialNotes.map(n => [`${n.section_id}:${n.instrument}`, n.note_text] as const),
+      ...initialSongNotes
+        .filter(n => n.song_id)
+        .map(n => [songNoteKey(n.song_id!, n.instrument), n.note_text] as const),
+    ])
   )
   const [editingNote, setEditingNote] = useState<string | null>(null)
   const [savingNote, setSavingNote] = useState(false)
@@ -320,8 +436,8 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
   const channelRef = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null)
   const isLiveRef = useRef(false)
-  const activeSongIdxRef = useRef(0)
-  const [paneIdx, setPaneIdx] = useState(0) // 0 = part, 1 = chords (phone swipe)
+  const activeSongIdxRef = useRef(startIdx)
+  const [paneIdx, setPaneIdx] = useState(initialPane === 'chords' ? 1 : 0) // 0 = part, 1 = chords (phone swipe)
   const swipeRef = useRef<HTMLDivElement | null>(null)
 
   const hasAnyChords = songs.some(s => chordsBySongId[s.id])
@@ -380,9 +496,11 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   // Song tempo memory (v14): lives on the library song, shown/edited here
   const [tempos, setTempos] = useState<Record<string, number | null>>(() => {
     const t: Record<string, number | null> = {}
+    // Seeded from tempoBySongId so a song with a library row but no reviewed
+    // chord sheet still shows its saved tempo (v19).
     for (const s of songs) {
-      const c = chordsBySongId[s.id]
-      if (c) t[c.librarySongId] = c.tempoBpm
+      const d = tempoBySongId[s.id]
+      if (d) t[d.librarySongId] = d.tempoBpm
     }
     return t
   })
@@ -397,11 +515,16 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   }
 
   function tempoPropsFor(song: Song) {
-    const c = chordsBySongId[song.id]
+    // v19: keyed off tempoBySongId, NOT chordsBySongId. Tempo is a property of
+    // the song; a chord sheet is a separate thing that may never arrive. The
+    // old version gated the whole chip on having a reviewed sheet, so the one
+    // song you most want to set a tempo for in rehearsal — a brand-new one —
+    // showed no chip at all, and therefore no pulse.
+    const t = tempoBySongId[song.id]
     return {
-      tempo: c ? tempos[c.librarySongId] ?? null : null,
-      canEditTempo: !!c,
-      onSaveTempo: (bpm: number | null) => { if (c) saveTempo(c.librarySongId, bpm) },
+      tempo: t ? tempos[t.librarySongId] ?? null : null,
+      canEditTempo: !!t,
+      onSaveTempo: (bpm: number | null) => { if (t) saveTempo(t.librarySongId, bpm) },
     }
   }
 
@@ -416,6 +539,25 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     if (!el) return
     el.scrollTo({ left: idx * el.clientWidth, behavior: 'smooth' })
   }
+
+  // Deep-linked straight to the chords pane (?pane=chords). paneIdx is DERIVED
+  // from scroll position by onSwipeScroll, so seeding the state isn't enough —
+  // the scroller has to be moved. Instant, not smooth: the user tapped a chord
+  // row and should just be there. rAF-retries until the pane has a measured
+  // width (0 on the first paint after hydration). No-op at sm+ where both
+  // panes are already side by side and the container doesn't scroll.
+  useEffect(() => {
+    if (initialPane !== 'chords' || !hasAnyChords) return
+    let raf = 0
+    const jump = () => {
+      const el = swipeRef.current
+      if (!el) return
+      if (el.clientWidth === 0) { raf = requestAnimationFrame(jump); return }
+      el.scrollTo({ left: el.clientWidth, behavior: 'auto' })
+    }
+    jump()
+    return () => cancelAnimationFrame(raf)
+  }, [initialPane, hasAnyChords])
 
   // Rolling swipe: at either edge, swiping "past the end" wraps to the other
   // pane — so either direction always switches, no dead ends.
@@ -630,6 +772,36 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     setEditingNote(null)
   }
 
+  /** Whole-song note (v19). Mirrors saveNote, keyed on song_id. The onConflict
+   *  target names a PLAIN unique constraint on purpose — supabase-js emits
+   *  ON CONFLICT with no WHERE clause, and Postgres cannot infer a partial
+   *  index from that, so v19 avoided partial indexes entirely. */
+  async function saveSongNote(songId: string, text: string) {
+    const key = songNoteKey(songId, viewInstrument)
+    const trimmed = text.trim()
+    setSavingNote(true)
+    if (trimmed) {
+      await getClient().from('user_notes').upsert({
+        user_id: userId, song_id: songId, instrument: viewInstrument, note_text: trimmed,
+      }, { onConflict: 'user_id,song_id,instrument' })
+      setNotes(prev => ({ ...prev, [key]: trimmed }))
+    } else {
+      await getClient().from('user_notes').delete()
+        .eq('user_id', userId).eq('song_id', songId).eq('instrument', viewInstrument)
+      setNotes(prev => { const n = { ...prev }; delete n[key]; return n })
+    }
+    setSavingNote(false)
+    setEditingNote(null)
+  }
+
+  // Everything that floats above the fixed footer is positioned off its height.
+  // Footer ≈ 113px: pt-2.5(10) + Stage/Live row(~22) + mb-2(8) + Prev/Next(56)
+  // + pb-4(16). Prev/Next growing from py-2.5 to py-4 moved this by ~16px, so
+  // both offsets below moved with it. ChordsPane's key button sits at 186px and
+  // still clears this (and Live's ~110px footer) comfortably.
+  const FLOAT_ROW = '156px'      // instrument pill (left) + fullscreen (right)
+  const PANE_SWITCH_ROW = '134px' // Part/Chords tabs, centred
+
   const hc = highContrast
   const bg = hc ? 'bg-white' : 'bg-black'
   const fg = hc ? 'text-black' : 'text-white'
@@ -659,6 +831,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     onToggleNote: (sectionId: string) => setOpenNotes(prev => ({ ...prev, [sectionId]: !prev[sectionId] })),
     onStartEdit: (key: string) => setEditingNote(key),
     onSaveNote: saveNote,
+    onSaveSongNote: saveSongNote,
     onCancelEdit: () => setEditingNote(null),
   }
 
@@ -679,10 +852,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
             const shortTitle = song.title.length > 12 ? song.title.slice(0, 12) + '…' : song.title
             return (
               <button key={song.id}
-                onClick={() => {
-                  goToSong(si)
-                  if (layout === 'scroll') document.getElementById(`song-${si}`)?.scrollIntoView({ behavior: 'smooth' })
-                }}
+                onClick={() => goToSong(si)}
                 className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-all active:scale-95 ${
                   isActive
                     ? (hc ? 'bg-black text-white' : 'bg-white text-black')
@@ -716,13 +886,38 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
         </div>
       </div>
 
+      {/* Floating instrument pill. Replaces the row of instrument chips that
+          used to sit in the footer: almost nobody changes instrument twice in a
+          service, so it was spending prime thumb-zone space on a once-ever
+          action. Left edge — the right edge already carries fullscreen, and the
+          chords pane puts its key button there too. Doubles as a readout, which
+          matters because the instrument decides which instructions and notes
+          you see. */}
+      {instruments.length > 0 && (
+        <button
+          onClick={() => setInstrumentSheet(true)}
+          className={`fixed left-3 z-20 h-8 max-w-[45%] px-2.5 rounded-full border flex items-center gap-1.5 active:scale-95 transition-colors ${
+            hc ? 'bg-zinc-100 border-zinc-300 text-zinc-700' : 'bg-zinc-900/90 border-zinc-700 text-zinc-300'
+          }`}
+          style={{ bottom: FLOAT_ROW }}
+          aria-label="Change instrument"
+        >
+          <svg className="w-3.5 h-3.5 shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19a3 3 0 11-6 0 3 3 0 016 0zM21 16a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          <span className="text-[10px] font-bold uppercase tracking-wide truncate">
+            {viewInstrument || 'Instrument'}
+          </span>
+        </button>
+      )}
+
       {/* Floating fullscreen button */}
       <button
         onClick={toggleFullscreen}
         className={`fixed right-3 z-20 w-8 h-8 rounded-full border flex items-center justify-center active:scale-95 transition-colors ${
           hc ? 'bg-zinc-100 border-zinc-300 text-zinc-600' : 'bg-zinc-900/90 border-zinc-700 text-zinc-400 hover:text-white'
         }`}
-        style={{ bottom: '140px' }}
+        style={{ bottom: FLOAT_ROW }}
         aria-label="Toggle fullscreen"
       >
         {isFullscreen ? (
@@ -750,23 +945,11 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
           MUST get both panes live side by side — that's the whole point. */}
       <div className={hasAnyChords ? 'min-w-full sm:min-w-0 snap-center overflow-y-auto h-full' : 'flex-1 min-h-0 overflow-y-auto'}>
       <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
-        {layout === 'song' ? (
-          <>
-            {pulsePrompt && tempoPropsFor(activeSong).tempo !== null && (
-              <PulsePrompt hc={hc} onAnswer={answerPulsePrompt} className="mb-3" />
-            )}
-            <SongBlock song={activeSong} {...sharedProps} {...tempoPropsFor(activeSong)}
-              pulseOn={pulseOn} onTogglePulse={togglePulse} />
-          </>
-        ) : (
-          <div className="space-y-6">
-            {songs.map((song, si) => (
-              <div key={song.id} id={`song-${si}`}>
-                <SongBlock song={song} {...sharedProps} {...tempoPropsFor(song)} compact />
-              </div>
-            ))}
-          </div>
+        {pulsePrompt && tempoPropsFor(activeSong).tempo !== null && (
+          <PulsePrompt hc={hc} onAnswer={answerPulsePrompt} className="mb-3" />
         )}
+        <SongBlock song={activeSong} {...sharedProps} {...tempoPropsFor(activeSong)}
+          pulseOn={pulseOn} onTogglePulse={togglePulse} />
       </div>
       </div>
 
@@ -802,7 +985,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       {/* Part / Chords pane switcher (phones) */}
       {hasAnyChords && (
         <div className="sm:hidden fixed left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-full border p-0.5 bg-zinc-900/95 border-zinc-700"
-          style={{ bottom: '118px' }}>
+          style={{ bottom: PANE_SWITCH_ROW }}>
           <button onClick={() => scrollToPane(0)}
             className={`rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wide ${
               paneIdx === 0 ? 'bg-white text-black' : 'text-zinc-400'
@@ -848,22 +1031,46 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
         </div>
       )}
 
+      {/* Instrument sheet. Same scrim + rounded-t-2xl bottom sheet as the key
+          picker in ChordsPane, so there's one sheet idiom in the app. */}
+      {instrumentSheet && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/60" onClick={() => setInstrumentSheet(false)} />
+          <div className={`fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t p-4 pb-8 ${
+            hc ? 'bg-white border-zinc-300' : 'bg-zinc-900 border-zinc-700'
+          }`}>
+            <p className={`text-[11px] font-semibold uppercase tracking-widest mb-3 ${dim}`}>Your instrument</p>
+            <div className="flex flex-wrap gap-2">
+              {instruments.map(instr => (
+                <button
+                  key={instr}
+                  onClick={() => { handleInstrumentChange(instr); setInstrumentSheet(false) }}
+                  className={`rounded-xl px-4 py-2.5 text-xs font-bold uppercase tracking-wide active:scale-95 transition-all ${
+                    instr === viewInstrument
+                      ? (hc ? 'bg-black text-white' : 'bg-white text-black')
+                      : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
+                  }`}
+                >
+                  {instr}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setInstrumentSheet(false)}
+              className={`mt-4 w-full rounded-xl py-3 text-sm font-semibold ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}
+            >
+              Done
+            </button>
+          </div>
+        </>
+      )}
+
       {/* Fixed bottom bar */}
       <div className={`fixed bottom-0 left-0 right-0 border-t ${borderB} ${bg} px-4 pt-2.5 pb-4`}>
-        {/* Instruments + Stage + Go Live */}
-        <div className="flex items-center gap-1.5 mb-2 overflow-x-auto no-scrollbar">
-          {instruments.map(instr => (
-            <button key={instr} onClick={() => handleInstrumentChange(instr)}
-              className={`shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide transition-all active:scale-95 ${
-                instr === viewInstrument
-                  ? (hc ? 'bg-black text-white' : 'bg-white text-black')
-                  : (hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400')
-              }`}>
-              {instr}
-            </button>
-          ))}
+        {/* Stage + Go Live only — instruments now live in the floating pill */}
+        <div className="flex items-center gap-1.5 mb-2">
           <button onClick={toggleContrast}
-            className={`ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
+            className={`shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
             {hc ? 'Stage off' : 'Stage'}
           </button>
           <button
@@ -877,32 +1084,22 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
           </button>
         </div>
 
-        {/* Prev / layout toggle / Next */}
-        <div className="flex items-center gap-2">
+        {/* Prev / Next — py-4 + text-base, ~56px of target each. These get hit
+            mid-song, one-handed, in the dark; they were py-2.5 text-sm with a
+            layout toggle wedged between them eating the middle of the bar.
+            Next is the primary here exactly as it is in Live, so the muscle
+            memory transfers between the two stage surfaces. */}
+        <div className="flex gap-3">
           <button
             onClick={() => goToSong(activeSongIdx - 1)}
             disabled={activeSongIdx === 0}
-            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold disabled:opacity-30 active:scale-95 transition-all ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
+            className={`flex-1 rounded-xl py-4 text-base font-semibold disabled:opacity-30 active:scale-95 transition-all ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
             ← Prev
-          </button>
-          <button
-            onClick={() => setLayout(l => l === 'song' ? 'scroll' : 'song')}
-            className={`rounded-xl px-3 py-2.5 text-[10px] font-bold uppercase tracking-wide active:scale-95 transition-all ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}
-            title={layout === 'song' ? 'Switch to scroll view' : 'Switch to song view'}>
-            {layout === 'song' ? (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-            )}
           </button>
           <button
             onClick={() => goToSong(activeSongIdx + 1)}
             disabled={activeSongIdx === songs.length - 1}
-            className={`flex-1 rounded-xl py-2.5 text-sm font-semibold disabled:opacity-30 active:scale-95 transition-all ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}>
+            className={`flex-1 rounded-xl py-4 text-base font-bold disabled:opacity-30 active:scale-95 transition-all ${hc ? 'bg-black text-white' : 'bg-white text-black'}`}>
             Next →
           </button>
         </div>

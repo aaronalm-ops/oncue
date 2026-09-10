@@ -22,9 +22,23 @@ export interface SongChordsData {
   tempoBpm: number | null
 }
 
+/** A song's library identity + canonical tempo, INDEPENDENT of chord sheets. */
+export interface SongTempoData {
+  librarySongId: string
+  tempoBpm: number | null
+}
+
 export interface ServiceChords {
   chordsBySongId: Record<string, SongChordsData>
   prefsByLibraryId: Record<string, string>
+  /**
+   * Every song that resolves to a library song, whether or not a reviewed
+   * chord sheet exists. Tempo is a property of the SONG; chord sheets are a
+   * separate thing that may never arrive. Gating BPM on chordsBySongId meant a
+   * brand-new song in a setlist — exactly the one you set the tempo for in
+   * rehearsal — had no tempo chip and therefore no beat pulse.
+   */
+  tempoBySongId: Record<string, SongTempoData>
 }
 
 export async function fetchServiceChords(
@@ -35,7 +49,7 @@ export async function fetchServiceChords(
 ): Promise<ServiceChords> {
   const light = options?.light === true
   const norm = normTitle
-  const empty: ServiceChords = { chordsBySongId: {}, prefsByLibraryId: {} }
+  const empty: ServiceChords = { chordsBySongId: {}, prefsByLibraryId: {}, tempoBySongId: {} }
   if (songs.length === 0) return empty
 
   const songIds = songs.map(s => s.id)
@@ -76,6 +90,13 @@ export async function fetchServiceChords(
     const lib = linkMap.get(s.id) ?? byTitle.get(norm(s.title))
     if (lib) songToLib.set(s.id, lib)
   }
+  // Built from songToLib BEFORE any version filtering — this is the whole
+  // point: a song with a library row but no reviewed sheet still has a tempo.
+  const tempoBySongId: Record<string, SongTempoData> = {}
+  for (const [songId, libId] of songToLib) {
+    tempoBySongId[songId] = { librarySongId: libId, tempoBpm: tempoByLib.get(libId) ?? null }
+  }
+
   const libIds = [...new Set(songToLib.values())]
   if (libIds.length === 0) return empty
 
@@ -152,5 +173,6 @@ export async function fetchServiceChords(
   return {
     chordsBySongId,
     prefsByLibraryId: Object.fromEntries((prefs ?? []).map(p => [p.library_song_id, p.preferred_key])),
+    tempoBySongId,
   }
 }

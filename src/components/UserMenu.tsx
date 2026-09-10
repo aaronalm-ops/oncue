@@ -25,6 +25,8 @@ export default function UserMenu({ instrument, role, displayName = null }: Props
   }
 
   const isPrivileged = role === 'master' || role === 'admin'
+  // Same gate as worship_stats(): leaders see their own numbers, admins see all.
+  const canSeeStats = isPrivileged || role === 'worship_leader'
 
   return (
     <div className="relative">
@@ -63,6 +65,18 @@ export default function UserMenu({ instrument, role, displayName = null }: Props
               </svg>
               My Profile
             </Link>
+            {canSeeStats && (
+              <Link
+                href="/stats"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-3 px-4 py-3 text-sm text-white active:bg-zinc-800 transition-colors"
+              >
+                <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6M15 19V9M21 19V5M3 19v-2" />
+                </svg>
+                Stats
+              </Link>
+            )}
             {isPrivileged && (
               <>
                 <div className="border-t border-zinc-800" />
