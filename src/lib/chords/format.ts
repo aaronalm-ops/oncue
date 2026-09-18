@@ -458,6 +458,20 @@ export function mapChartSectionsToChords(
   overrides?: Record<string, string>,
 ): ChartChordsMap {
   const chordSections = deriveSections(body)
+
+  // A song the chart hasn't sectioned at all — a fresh setlist entry nobody
+  // has played before, or an impromptu — has nothing to map against. Show the
+  // whole sheet as ONE in-chart card. Falling through would put every section
+  // under "not in this week's chart", dimmed, which is exactly backwards: it
+  // IS this week's chart, it just has no structure yet.
+  if (chartLabels.length === 0 && chordSections.length > 0) {
+    return {
+      sections: [{ label: 'Whole song', content: body.trim() || null, wholeSong: true }],
+      leftovers: [],
+      matched: 1,
+    }
+  }
+
   const byFull = new Map<string, DerivedSection[]>()
   const byBase = new Map<string, DerivedSection[]>()
   for (const s of chordSections) {

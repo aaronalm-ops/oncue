@@ -226,23 +226,41 @@ export default function SongDetailClient({ song, versions: versionsProp, canMana
           )}
         </div>
 
-        {/* Impromptu live share — push this song onto everyone's Live view now */}
-        {todayServiceId && hasReviewed && (
-          <button
-            onClick={toggleShareLive}
-            disabled={shareBusy}
-            className={`mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold disabled:opacity-50 active:scale-95 transition-transform ${
-              isSharedLive ? 'bg-amber-600 text-white' : 'bg-zinc-900 border border-amber-800/60 text-amber-400'
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${isSharedLive ? 'bg-white animate-pulse' : 'bg-amber-500'}`} />
-            {shareBusy
-              ? 'Working…'
-              : isSharedLive
-                ? 'Live now on everyone’s screen — tap to end'
-                : 'Share live to today’s service'}
-          </button>
-        )}
+        {/* Impromptu live share — push this song onto everyone's Live view now.
+            This used to render ONLY when there was a service dated today AND a
+            reviewed sheet, so on any other day it simply vanished and read as a
+            bug ("the live option disappeared"). It now always renders; when it
+            can't act it's disabled and says why. The today-only rule itself is
+            right — an impromptu is pushed into a live session_state, and you
+            don't want that landing on a future service. */}
+        {(() => {
+          const blocker = !hasReviewed
+            ? 'Add chords to this song first — nothing to put on screen yet'
+            : !todayServiceId
+              ? 'Only on a service day — there’s no service dated today'
+              : null
+          return (
+            <div className="mt-4">
+              <button
+                onClick={toggleShareLive}
+                disabled={shareBusy || blocker !== null}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold disabled:opacity-40 active:scale-95 transition-transform ${
+                  isSharedLive ? 'bg-amber-600 text-white' : 'bg-zinc-900 border border-amber-800/60 text-amber-400'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${isSharedLive ? 'bg-white animate-pulse' : 'bg-amber-500'}`} />
+                {shareBusy
+                  ? 'Working…'
+                  : isSharedLive
+                    ? 'Live now on everyone’s screen — tap to end'
+                    : 'Share live to today’s service'}
+              </button>
+              {blocker && (
+                <p className="mt-1.5 text-center text-[11px] text-zinc-600">{blocker}</p>
+              )}
+            </div>
+          )
+        })()}
 
         <div className="mt-5 space-y-3">
           {versions.length === 0 && (
