@@ -55,22 +55,31 @@ export function accumulateChroma(
   chroma: Float64Array,
   opts: { fMin?: number; fMax?: number } = {},
 ): void {
-  const fMin = opts.fMin ?? 60     // below the low E on a bass — rumble
-  const fMax = opts.fMax ?? 2000   // above this it's mostly consonants + cymbals
+  const fMin = opts.fMin ?? 70     // below the low E on a bass — rumble
+  const fMax = opts.fMax ?? 1200   // fundamentals live here; above is mostly harmonics + consonants
   const binHz = sampleRate / fftSize
   const lo = Math.max(1, Math.ceil(fMin / binHz))
   const hi = Math.min(power.length - 2, Math.floor(fMax / binHz))
+
+  // Loudest bin in range → every frame votes with the same total weight, and
+  // log compression stops one held note from drowning the rest of the frame
+  // (linear power made a single sustained "aaah" decide the whole key).
+  let max = 0
+  for (let i = lo; i <= hi; i++) if (power[i] > max) max = power[i]
+  if (!(max > 0)) return
+
   for (let i = lo; i <= hi; i++) {
     const p = power[i]
     // Only spectral peaks count — the floor between harmonics is noise.
     if (p <= power[i - 1] || p < power[i + 1]) continue
+    const rel = p / max
+    if (rel < 0.001) continue // 30 dB below the frame's loudest — noise floor
     const f = i * binHz
     const pitch = 12 * Math.log2(f / 440) + 69
     const nearest = Math.round(pitch)
     // A peak sitting between two semitones isn't a note (drum ring, breath).
     if (Math.abs(pitch - nearest) > 0.35) continue
-    // Sub-bin interpolation of the peak so a wide FFT bin doesn't smear.
-    chroma[((nearest % 12) + 12) % 12] += p
+    chroma[((nearest % 12) + 12) % 12] += Math.log1p(100 * rel)
   }
 }
 
@@ -120,9 +129,20 @@ export function relative(c: { tonic: number; mode: Mode }): { tonic: number; mod
 }
 
 /**
- * The best key in a given mode — used once the song is identified and we
- * know its sheet is major or minor. Turns a G/Em coin-flip into a fact.
+ * The key in a given mode — used once the song is identified and we know
+ * its sheet is major or minor. Turns a G/Em coin-flip into a fact.
+ *
+ * The relative key of the winner comes first: G-major chroma asked for
+ * "minor" should say Em (same notes), not whichever unrelated minor key
+ * happens to correlate a hair better. Only if the relative is clearly
+ * worse do we fall back to the best key in that mode.
  */
 export function snapToMode(est: KeyEstimate, mode: Mode): KeyCandidate {
-  return est.ranked.find(c => c.mode === mode) ?? est.ranked[0]
+  const best = est.ranked[0]
+  if (best.mode === mode) return best
+  const rel = relative(best)
+  const relC = est.ranked.find(c => c.tonic === rel.tonic && c.mode === rel.mode)
+  const bestInMode = est.ranked.find(c => c.mode === mode)
+  if (relC && bestInMode && relC.r >= bestInMode.r - 0.08) return relC
+  return bestInMode ?? best
 }

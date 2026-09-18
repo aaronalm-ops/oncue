@@ -55,10 +55,11 @@ interface Props {
   backHref: string
 }
 
-type Phase = 'idle' | 'starting' | 'listening' | 'done'
+type Phase = 'idle' | 'key' | 'words' | 'done'
 
 const MAX_LISTEN_MS = 30_000
-const MIN_KEY_MS = 3_000        // don't call a key before this much audio
+const KEY_PHASE_MS = 4_500      // mic goes to key detection first, then to voice — never both at once
+const MIN_KEY_MS = 2_000        // don't call a key before this much audio
 const QUERY_WORDS = 10          // rolling window sent to identify_song
 const STRONG = 0.6              // "that's the one" threshold for the UI
 const AUTO_STOP_SCORE = 0.85    // stop early when the match is unmistakable
@@ -81,6 +82,8 @@ export default function IdentifyClient({ target, backHref }: Props) {
   const [typed, setTyped] = useState('')
   const [searching, setSearching] = useState(false)
   const [chosen, setChosen] = useState<Candidate | null>(null)
+  const [queries, setQueries] = useState(0)      // diagnostics: lookups made this listen
+  const [voiceNote, setVoiceNote] = useState<string | null>(null) // diagnostics: what the recogniser said
 
   // Everything that must survive re-renders without re-running effects
   const recRef = useRef<SpeechRecognitionLike | null>(null)
@@ -104,9 +107,12 @@ export default function IdentifyClient({ target, backHref }: Props) {
     if (!q || q === lastQueryRef.current) return
     lastQueryRef.current = q
     const { data, error: err } = await getClient().rpc('identify_song', { p_text: q, p_limit: 6 })
+    setQueries(n => n + 1)
     if (err) {
-      if (err.message?.includes('does not exist')) setError('Song matching isn’t set up yet — run supabase/v21_identify.sql.')
-      else console.error('[identify]', err)
+      // Always visible — a silent console.error here cost a whole test session.
+      setError(err.message?.includes('does not exist')
+        ? 'Song matching isn’t set up on the database yet — run supabase/v21_identify.sql.'
+        : `Matching failed: ${err.message}`)
       return
     }
     const rows = (data ?? []) as Candidate[]
@@ -161,59 +167,76 @@ export default function IdentifyClient({ target, backHref }: Props) {
 
   /* ---------------- key detection (on-device) ---------------- */
 
-  async function startKeyDetection() {
+  /**
+   * Phase 1: the mic goes to Web Audio for KEY_PHASE_MS, then is RELEASED
+   * before voice recognition starts. Running getUserMedia and
+   * SpeechRecognition at the same time is what broke the first field test —
+   * Android Chrome gave the mic to one and starved the other (key right,
+   * words never arrived). Sequential costs ~4s and works everywhere.
+   */
+  async function runKeyPhase(): Promise<void> {
+    let stream: MediaStream | null = null
+    let ctx: AudioContext | null = null
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       })
+      if (!listeningRef.current) { stream.getTracks().forEach(t => t.stop()); return }
       streamRef.current = stream
       const Ctx = (window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)
-      const ctx = new Ctx()
+      ctx = new Ctx()
       audioCtxRef.current = ctx
       const src = ctx.createMediaStreamSource(stream)
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 8192
-      analyser.smoothingTimeConstant = 0.5
+      analyser.smoothingTimeConstant = 0.3
       src.connect(analyser)
       const db = new Float32Array(analyser.frequencyBinCount)
       const power = new Float32Array(analyser.frequencyBinCount)
       chromaRef.current.fill(0)
+      const t0 = Date.now()
 
-      const tick = window.setInterval(() => {
-        if (ctx.state !== 'running') { ctx.resume().catch(() => {}); return }
-        analyser.getFloatFrequencyData(db)
-        let peak = -Infinity
-        for (let i = 0; i < db.length; i++) { power[i] = 10 ** (db[i] / 10); if (db[i] > peak) peak = db[i] }
-        if (peak < -75) return // silence — don't let the noise floor vote
-        accumulateChroma(power, ctx.sampleRate, analyser.fftSize, chromaRef.current)
-      }, 100)
-      const judge = window.setInterval(() => {
-        if (Date.now() - startedAtRef.current < MIN_KEY_MS) return
-        setKeyEst(estimateKey(chromaRef.current))
-      }, 1000)
-      timersRef.current.push(tick, judge)
+      await new Promise<void>(resolve => {
+        const tick = window.setInterval(() => {
+          if (!listeningRef.current || Date.now() - t0 >= KEY_PHASE_MS) { clearInterval(tick); resolve(); return }
+          if (ctx!.state !== 'running') { ctx!.resume().catch(() => {}); return }
+          analyser.getFloatFrequencyData(db)
+          let peak = -Infinity
+          for (let i = 0; i < db.length; i++) { power[i] = 10 ** (db[i] / 10); if (db[i] > peak) peak = db[i] }
+          if (peak < -75) return // silence — don't let the noise floor vote
+          accumulateChroma(power, ctx!.sampleRate, analyser.fftSize, chromaRef.current)
+          if (Date.now() - t0 >= MIN_KEY_MS) setKeyEst(estimateKey(chromaRef.current))
+        }, 100)
+        timersRef.current.push(tick)
+      })
+      setKeyEst(estimateKey(chromaRef.current))
     } catch (e) {
       const name = (e as { name?: string })?.name
-      setKeyDetectOff(name === 'NotAllowedError' ? 'mic blocked' : 'not available here')
+      setKeyDetectOff(name === 'NotAllowedError' ? 'mic blocked' : `not available (${name ?? 'unknown'})`)
+    } finally {
+      // Hand the mic back before voice recognition asks for it.
+      stream?.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+      await ctx?.close().catch(() => {})
+      audioCtxRef.current = null
     }
   }
 
-  /* ---------------- listening ---------------- */
+  /* ---------------- voice → words ---------------- */
 
-  function startRecognition(withKey: boolean) {
+  function startRecognition() {
     const Ctor = getSpeechRecognition()
-    if (!Ctor) { setError('Voice needs Chrome, or Safari 14.5+. You can still type a lyric below.'); setPhase('idle'); return }
+    if (!Ctor) { setError('Voice needs Chrome, or Safari 14.5+. You can still type a lyric below.'); stopAll('done'); return }
     const rec = new Ctor()
     rec.lang = 'en-US'
     rec.continuous = true
     rec.interimResults = true
     rec.maxAlternatives = 1
-    rec.onstart = () => {
-      if (!listeningRef.current) return
-      setPhase('listening')
-      if (withKey && !streamRef.current) startKeyDetection()
-    }
+    let restarts = 0
+    let gotAnything = false
+    rec.onstart = () => { if (listeningRef.current) setVoiceNote('voice on') }
     rec.onresult = (e: SREvent) => {
+      gotAnything = true
       let finals = finalsRef.current
       let live = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -229,57 +252,60 @@ export default function IdentifyClient({ target, backHref }: Props) {
     }
     rec.onerror = (e: SRErrorEvent) => {
       if (!listeningRef.current) return
-      if (e.error === 'no-speech' || e.error === 'aborted') return // onend will restart
-      if (e.error === 'audio-capture' && streamRef.current) {
-        // Chrome on some Android builds won't share the mic between
-        // SpeechRecognition and getUserMedia. Words matter more than the
-        // key — drop key detection and carry on.
-        streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null
-        audioCtxRef.current?.close().catch(() => {}); audioCtxRef.current = null
-        timersRef.current.forEach(t => clearInterval(t)); timersRef.current = []
-        setKeyDetectOff('mic is busy with voice on this phone')
-        return
-      }
+      setVoiceNote(`voice: ${e.error}`)
+      if (e.error === 'no-speech' || e.error === 'aborted' || e.error === 'network') return // onend restarts
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
         setError('Microphone access was blocked. Allow the mic for OnCue in your browser settings, or type a lyric below.')
-        stopAll('idle')
+        stopAll('done')
         return
       }
-      setError(`Listening stopped (${e.error}). Tap to try again, or type a lyric below.`)
-      stopAll('idle')
+      setError(`Voice recognition stopped (${e.error}). Tap to try again, or type a lyric below.`)
+      stopAll('done')
     }
     rec.onend = () => {
       // Continuous recognition still ends itself after a pause — keep going
-      // until we say stop.
-      if (listeningRef.current && Date.now() - startedAtRef.current < MAX_LISTEN_MS) {
-        try { rec.start() } catch { /* already starting */ }
+      // until we say stop. If it keeps ending with nothing heard, say so
+      // instead of spinning silently.
+      if (!listeningRef.current || Date.now() - startedAtRef.current >= MAX_LISTEN_MS) return
+      restarts++
+      if (!gotAnything && restarts >= 4) {
+        setError('Voice recognition isn’t returning any words on this phone. Type a lyric below instead.')
+        stopAll('done')
+        return
       }
+      try { rec.start() } catch { /* already starting */ }
     }
     recRef.current = rec
-    try { rec.start() } catch { setError('Couldn’t start listening. Tap again.'); setPhase('idle') }
+    try { rec.start() } catch { setError('Couldn’t start voice recognition. Tap again.'); stopAll('done') }
   }
 
-  function begin() {
+  async function begin() {
     setError(null)
     setCandidates({})
     setKeyEst(null)
     setKeyDetectOff(null)
+    setVoiceNote(null)
+    setQueries(0)
     setChosen(null)
     setTranscript(''); setInterim('')
     finalsRef.current = ''; interimRef.current = ''; lastQueryRef.current = ''; bestScoreRef.current = 0
     startedAtRef.current = Date.now()
     listeningRef.current = true
     setElapsed(0)
-    setPhase('starting')
+    setPhase('key')
     const clock = window.setInterval(() => {
       const ms = Date.now() - startedAtRef.current
       setElapsed(ms)
       if (ms >= MAX_LISTEN_MS) { stopAll('done'); return }
-      // Shazam moment: unmistakable match + a settled key → stop early.
-      if (ms > 8_000 && bestScoreRef.current >= AUTO_STOP_SCORE && (keyEstRef.current?.confidence ?? 0) >= 0.5) stopAll('done')
+      // Shazam moment: an unmistakable match → stop early (key is already in).
+      if (ms > KEY_PHASE_MS + 3_000 && bestScoreRef.current >= AUTO_STOP_SCORE) stopAll('done')
     }, 250)
     timersRef.current.push(clock)
-    startRecognition(true)
+
+    await runKeyPhase()
+    if (!listeningRef.current) return
+    setPhase('words')
+    startRecognition()
   }
   useEffect(() => { keyEstRef.current = keyEst }, [keyEst])
 
@@ -304,7 +330,9 @@ export default function IdentifyClient({ target, backHref }: Props) {
     const sheetMode: Mode | null = modeOfKey(top?.stored_key)
     const pick = sheetMode ? snapToMode(keyEst, sheetMode) : keyEst.ranked[0]
     const snapped = sheetMode !== null && (pick.tonic !== keyEst.tonic || pick.mode !== keyEst.mode)
-    return { label: keyLabel(pick.tonic, pick.mode), mode: pick.mode, confidence: keyEst.confidence, snapped, sheetMode }
+    // Runner-up that isn't just the relative of the pick — the honest "or…"
+    const alt = keyEst.ranked.find(c => !(c.tonic === pick.tonic && c.mode === pick.mode) && !(c.tonic === (pick.mode === 'major' ? (pick.tonic + 9) % 12 : (pick.tonic + 3) % 12) && c.mode !== pick.mode))
+    return { label: keyLabel(pick.tonic, pick.mode), mode: pick.mode, confidence: keyEst.confidence, snapped, sheetMode, alt: alt ? keyLabel(alt.tonic, alt.mode) : null }
   }, [keyEst, top])
 
   /* ---------------- go live ---------------- */
@@ -327,7 +355,7 @@ export default function IdentifyClient({ target, backHref }: Props) {
     router.push(`/services/${target.id}/live`)
   }
 
-  const listening = phase === 'listening' || phase === 'starting'
+  const listening = phase === 'key' || phase === 'words'
   const secs = Math.floor(elapsed / 1000)
   const chosenMode: Mode = modeOfKey(goKey) ?? modeOfKey(chosen?.stored_key) ?? detected?.mode ?? 'major'
 
@@ -380,14 +408,20 @@ export default function IdentifyClient({ target, backHref }: Props) {
             </span>
           </button>
           <p className="mt-4 text-sm font-semibold text-zinc-300">
-            {phase === 'starting' && 'Starting…'}
-            {phase === 'listening' && `Listening · 0:${String(secs).padStart(2, '0')}`}
+            {phase === 'key' && 'Listening for the key…'}
+            {phase === 'words' && `Listening for words · 0:${String(secs).padStart(2, '0')}`}
             {phase === 'idle' && (srSupported ? 'Tap to listen' : 'Voice isn’t available in this browser')}
             {phase === 'done' && (top ? 'Here’s what I heard' : 'Nothing matched — try again closer to the singer')}
           </p>
           {(transcript || interim) && (
             <p className="mt-2 text-center text-xs text-zinc-500 italic leading-relaxed max-w-xs">
               “…{[transcript, interim].join(' ').trim().split(/\s+/).slice(-18).join(' ')}”
+            </p>
+          )}
+          {phase !== 'idle' && (
+            <p className="mt-2 text-[10px] text-zinc-700 tabular-nums">
+              {[transcript, interim].join(' ').trim().split(/\s+/).filter(Boolean).length} words heard · {queries} lookups
+              {voiceNote ? ` · ${voiceNote}` : ''}
             </p>
           )}
         </div>
@@ -401,13 +435,14 @@ export default function IdentifyClient({ target, backHref }: Props) {
                 <span className="text-lg font-black text-purple-300">{detected.label}</span>
                 <span className="text-[11px] text-zinc-500">
                   {detected.confidence >= 0.6 ? 'confident' : detected.confidence >= 0.3 ? 'likely' : 'guessing'}
+                  {detected.alt && detected.confidence < 0.6 && ` · or ${detected.alt}`}
                   {detected.snapped && ` · ${detected.sheetMode} like the sheet`}
                 </span>
               </div>
             ) : keyDetectOff ? (
               <p className="text-[11px] text-zinc-600">Key detection off — {keyDetectOff}</p>
-            ) : listening ? (
-              <p className="text-[11px] text-zinc-600">Listening for the key…</p>
+            ) : phase === 'key' ? (
+              <p className="text-[11px] text-zinc-600">Hearing the key first (4s), then the words…</p>
             ) : null}
           </div>
         )}
