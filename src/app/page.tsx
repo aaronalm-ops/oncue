@@ -7,23 +7,16 @@ export default async function RootPage() {
   const user = await getAuthUser(supabase)
   if (!user) redirect('/auth/login')
 
-  // Check if profile has instrument set
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('instrument')
-    .eq('id', user.id)
-    .single()
+  // This is the PWA's launch screen — every cold open of the app comes
+  // through here, so the two lookups run together, not one after the other.
+  // Today's service — in the church's timezone, not the server's (UTC on Vercel)
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date())
+  const [{ data: profile }, { data: todayService }] = await Promise.all([
+    supabase.from('profiles').select('instrument').eq('id', user.id).single(),
+    supabase.from('services').select('id').eq('service_date', today).single(),
+  ])
 
   if (!profile?.instrument) redirect('/auth/select-instrument')
-
-  // Check for a service today — in the church's timezone, not the server's (UTC on Vercel)
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date())
-  const { data: todayService } = await supabase
-    .from('services')
-    .select('id')
-    .eq('service_date', today)
-    .single()
-
   if (todayService) redirect(`/services/${todayService.id}`)
 
   redirect('/services')

@@ -11,8 +11,17 @@ export default async function ServicesPage() {
   const supabase = await createClient()
 
   const user = await getAuthUser(supabase)
-  const { data: profile } = await supabase
-    .from('profiles').select('role, instrument, display_name, teams, profile_completed_at').eq('id', user!.id).single()
+  // Profile and the services list don't depend on each other — one round trip
+  // instead of two (perf).
+  const [{ data: profile }, { data: services }] = await Promise.all([
+    supabase
+      .from('profiles').select('role, instrument, display_name, teams, profile_completed_at').eq('id', user!.id).single(),
+    supabase
+      .from('services')
+      .select('id, service_date, day_of_week, source_filename, worship_leader_id')
+      .order('service_date', { ascending: false })
+      .limit(50), // P7: ~6 months of history is plenty for the list
+  ])
   const role = (profile?.role ?? 'member') as AppRole
   const isPrivileged = role === 'master' || role === 'admin'
   const canAccessLibrary = true // v6: chords are open to every member
@@ -20,12 +29,6 @@ export default async function ServicesPage() {
   // One-time prompt for members who signed up before preferred-scale + teams.
   const p = profile as { instrument?: string | null; display_name?: string | null; teams?: string[]; profile_completed_at?: string | null } | null
   const needsProfilePrompt = !!p && !!p.instrument && !p.profile_completed_at
-
-  const { data: services } = await supabase
-    .from('services')
-    .select('id, service_date, day_of_week, source_filename, worship_leader_id')
-    .order('service_date', { ascending: false })
-    .limit(50) // P7: ~6 months of history is plenty for the list
 
   // Worship leader names for the list avatars (safe public directory view)
   const leaderIds = [...new Set(

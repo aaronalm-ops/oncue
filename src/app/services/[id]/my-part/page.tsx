@@ -1,8 +1,7 @@
 import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import MyPartClient from './MyPartClient'
-import { fetchServiceChords } from '@/lib/chords/service-chords'
-import { canSeeChords } from '@/lib/chords/access'
+import { fetchServiceBundle } from '@/lib/service-bundle'
 
 export default async function MyPartPage({
   params,
@@ -16,82 +15,18 @@ export default async function MyPartPage({
 
   const user = await getAuthUser(supabase) // local JWT validation (P1)
 
-  // P2: profile, service, and songs are independent — one parallel stage
-  const [{ data: profile }, { data: service }, songsRes] = await Promise.all([
-    supabase.from('profiles').select('instrument, role, preferred_key').eq('id', user!.id).single(),
-    supabase.from('services').select('id, service_date, day_of_week, instruments').eq('id', id).single(),
-    supabase
-      .from('songs')
-      .select(`
-        id, order_index, title, scale, medley_group, reference_links, in_chart,
-        sections (
-          id, order_index, label, comments, key_change,
-          instructions ( id, instrument, text, is_intro )
-        )
-      `)
-      .eq('service_id', id)
-      .order('order_index'),
-  ])
-  if (!service) notFound()
-
-  // v5 migration (in_chart) not applied yet? Degrade gracefully.
-  const songs = songsRes.error
-    ? (await supabase
-        .from('songs')
-        .select(`
-          id, order_index, title, scale, medley_group, reference_links,
-          sections (
-            id, order_index, label, comments,
-            instructions ( id, instrument, text, is_intro )
-          )
-        `)
-        .eq('service_id', id)
-        .order('order_index')).data?.map(s => ({ ...s, in_chart: true })) ?? null
-    : songsRes.data
+  // v20: ONE round trip — service, songs, profile, notes, chords, tempo.
+  const bundle = await fetchServiceBundle(supabase, id, user!.id)
+  if (!bundle) notFound()
+  const { service, profile, notes, chords } = bundle
 
   // The chart directs the flow — songs dropped by the chart stay out of My Part
-  const sortedSongs = (songs ?? []).filter(s => s.in_chart !== false).map(song => ({
-    ...song,
-    sections: (song.sections ?? [])
-      .sort((a, b) => a.order_index - b.order_index)
-      .map(section => ({
-        ...section,
-        instructions: section.instructions ?? [],
-      })),
-  }))
+  const sortedSongs = bundle.songs.filter(s => s.in_chart !== false)
 
-  // P2: personal notes and the chords resolver are independent — stage two.
-  // Two note queries, not one .or(): they run inside the same Promise.all so
-  // it costs no extra wall clock, and a hand-built or() filter over two UUID
-  // lists is the kind of string nobody can safely edit later.
-  const sectionIds = sortedSongs.flatMap(s => s.sections.map(sec => sec.id))
-  const songIds = sortedSongs.map(s => s.id)
-  type NoteRow = { id: string; section_id: string | null; song_id: string | null; instrument: string; note_text: string }
-  const emptyNotes = Promise.resolve({ data: [] as NoteRow[] })
-  const [{ data: sectionNotes }, { data: songNotes }, chords] = await Promise.all([
-    sectionIds.length
-      ? supabase
-          .from('user_notes')
-          .select('id, section_id, song_id, instrument, note_text')
-          .eq('user_id', user!.id)
-          .in('section_id', sectionIds)
-      : emptyNotes,
-    // v19: notes that belong to the whole song rather than one section — the
-    // only place to put anything on a song the chart hasn't sectioned yet.
-    songIds.length
-      ? supabase
-          .from('user_notes')
-          .select('id, section_id, song_id, instrument, note_text')
-          .eq('user_id', user!.id)
-          .in('song_id', songIds)
-      : emptyNotes,
-    // NOTE: tempo currently rides along with the chords gate. With
-    // CHORDS_OPEN_TO_ALL that is moot; if it is ever flipped off, members would
-    // lose the beat pulse too, which would be wrong — tempo isn't chords.
-    canSeeChords(profile?.role)
-      ? fetchServiceChords(supabase, sortedSongs, user!.id)
-      : Promise.resolve({ chordsBySongId: {}, prefsByLibraryId: {}, tempoBySongId: {} }),
-  ])
+  // Two lists, not one: section notes and (v19) song-level notes are keyed
+  // differently on the client.
+  const sectionNotes = notes.filter(n => n.section_id)
+  const songNotes = notes.filter(n => n.song_id)
 
   // Validate user's preferred instrument against what this service actually has
   const profileInstrument = profile?.instrument ?? null
@@ -122,13 +57,13 @@ export default async function MyPartPage({
       instruments={service.instruments}
       userInstrument={validatedInstrument}
       userId={user!.id}
-      initialNotes={(sectionNotes ?? []) as NoteRow[]}
-      initialSongNotes={(songNotes ?? []) as NoteRow[]}
+      initialNotes={sectionNotes}
+      initialSongNotes={songNotes}
       chordsBySongId={chords.chordsBySongId}
       tempoBySongId={chords.tempoBySongId}
       prefsByLibraryId={chords.prefsByLibraryId}
       canMapSections={isEditor}
-      preferredKey={(profile as { preferred_key?: string | null } | null)?.preferred_key ?? null}
+      preferredKey={profile?.preferred_key ?? null}
     />
   )
 }

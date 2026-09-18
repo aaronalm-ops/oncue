@@ -1,10 +1,10 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, getAuthUser } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { canSeeChords } from '@/lib/chords/access'
 import WorshipLeaderPicker from '@/components/WorshipLeaderPicker'
 import ShareSetlist from '@/components/ShareSetlist'
-import { fetchServiceChords } from '@/lib/chords/service-chords'
+import { fetchServiceBundle } from '@/lib/service-bundle'
 import LeaderBadge from '@/components/LeaderBadge'
 import { buildYouTubePlaylist, extractYouTubeId } from '@/lib/youtube'
 import type { AppTeam } from '@/lib/types'
@@ -23,39 +23,27 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   const { id } = await params
   const supabase = await createClient()
 
-  const [{ data: service }, { data: { user } }] = await Promise.all([
-    supabase.from('services').select('id, service_date, day_of_week, instruments, worship_leader_id, source_filename').eq('id', id).single(),
-    supabase.auth.getUser(),
-  ])
+  // getAuthUser validates the JWT locally (getClaims) — auth.getUser() was a
+  // round trip to Supabase Auth on every hub load. proxy.ts already gated
+  // this route, so the local check is sufficient here.
+  const user = await getAuthUser(supabase)
 
-  if (!service) notFound()
+  // v20: ONE round trip for the whole hub — service, leader, picker options,
+  // the viewer's role, songs and the light chord resolution (badges only).
+  // This page used to make five, one after another.
+  const bundle = await fetchServiceBundle(supabase, id, user!.id, { light: true })
+  if (!bundle) notFound()
+  const { service, leader, profile } = bundle
 
-  // Stage 2: everything that only depends on stage 1 — in parallel (perf)
-  const leaderId = (service as { worship_leader_id?: string | null }).worship_leader_id ?? null
-  const [leaderRes, profileRes, leaderOptionsRes] = await Promise.all([
-    leaderId
-      ? supabase.from('public_profiles').select('display_name, instrument, teams').eq('id', leaderId).maybeSingle()
-      : Promise.resolve({ data: null }),
-    user
-      ? supabase.from('profiles').select('role').eq('id', user.id).single()
-      : Promise.resolve({ data: null }),
-    // public_profiles exposes id/display_name/instrument/teams — it has NO role
-    // column (see v9). Selecting one made this query error out, which left the
-    // picker with zero options and no way to assign a leader at all.
-    supabase.from('public_profiles').select('id, display_name, teams').order('display_name', { ascending: true }),
-  ])
-  const leader = leaderRes.data
-  const profile = profileRes.data as { role?: string } | null
-
+  const leaderId = service.worship_leader_id ?? null
   const role = profile?.role ?? 'member'
   const canEdit = role !== 'member'
-  const leaderOptions = canEdit ? leaderOptionsRes.data : null
-  const pickerOptions = (leaderOptions ?? []).map(p => ({
-    id: p.id as string,
-    name: (p.display_name as string | null) || 'Unnamed member',
+  const pickerOptions = (canEdit ? bundle.leaderOptions : []).map(p => ({
+    id: p.id,
+    name: p.display_name || 'Unnamed member',
     // ★ marks the worship team. Role isn't readable here — profiles SELECT is
     // own-row-or-privileged, so a worship_leader would see an empty list.
-    isLeader: ((p as { teams?: string[] }).teams ?? []).includes('worship'),
+    isLeader: (p.teams ?? []).includes('worship'),
   }))
 
   const date = new Date(service.service_date + 'T00:00:00')
@@ -66,26 +54,7 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
   // Which songs have chords available (via confirmed link, or title match)?
   // Gated to editors until the parser rollout opens chords to everyone.
   const chordsVisible = canSeeChords(role)
-  type SongRow = { id: string; order_index: number; title: string; scale: string | null; in_chart?: boolean; reference_links?: string[] }
-  let songs: SongRow[] = []
-  if (chordsVisible) {
-    const res = await supabase
-      .from('songs')
-      .select('id, order_index, title, scale, in_chart, reference_links')
-      .eq('service_id', id)
-      .order('order_index')
-    if (res.error) {
-      // v5 migration (in_chart) not applied yet — degrade gracefully
-      const fallback = await supabase
-        .from('songs')
-        .select('id, order_index, title, scale, reference_links')
-        .eq('service_id', id)
-        .order('order_index')
-      songs = (fallback.data ?? []) as SongRow[]
-    } else {
-      songs = res.data ?? []
-    }
-  }
+  const songs = chordsVisible ? bundle.songs : []
 
   // Practice playlist — anonymous YouTube queue from the songs' reference links
   const playlist = buildYouTubePlaylist(songs.flatMap(s => s.reference_links ?? []))
@@ -93,9 +62,7 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
 
   // Single source of truth — the SAME resolver the chord panes use (QA #10),
   // so this list can never advertise chords a pane won't actually show.
-  const { chordsBySongId } = chordsVisible && user && songs.length
-    ? await fetchServiceChords(supabase, songs, user.id, { light: true }) // badges only — no bodies
-    : { chordsBySongId: {} as Record<string, unknown> }
+  const { chordsBySongId } = bundle.chords
   const songChords = songs.map(s => ({ ...s, hasChords: !!chordsBySongId[s.id] }))
   // Show the section whenever there are songs — "needs chords" rows are the
   // one-tap upload entry, most valuable when NOTHING has chords yet.
@@ -124,9 +91,9 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
             {leader && (
               <div className="mt-3">
                 <LeaderBadge
-                  name={(leader as { display_name?: string | null }).display_name ?? null}
-                  instrument={(leader as { instrument?: string | null }).instrument ?? null}
-                  teams={((leader as { teams?: string[] }).teams ?? []) as AppTeam[]}
+                  name={leader.display_name}
+                  instrument={leader.instrument}
+                  teams={(leader.teams ?? []) as AppTeam[]}
                 />
               </div>
             )}
@@ -208,7 +175,7 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
             id: s.id,
             title: s.title,
             scale: s.scale,
-            librarySongId: (chordsBySongId[s.id] as { librarySongId?: string } | undefined)?.librarySongId ?? null,
+            librarySongId: chordsBySongId[s.id]?.librarySongId ?? null,
           }))}
           playlistUrl={playlist.url}
         />

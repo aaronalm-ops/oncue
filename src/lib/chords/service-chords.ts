@@ -80,25 +80,18 @@ export async function fetchServiceChords(
     }
   }
 
+  // Which library songs matter? (same link-wins rule as the resolver)
   const linkMap = new Map((links ?? []).map(l => [l.song_id, l.library_song_id]))
-  const byTitle = new Map(librarySongs.map(ls => [norm(ls.title), ls.id]))
-  const tempoByLib = new Map(librarySongs.map(ls => [ls.id, ls.tempo_bpm ?? null]))
-
-  // Resolve each service song to a library song (confirmed link wins)
-  const songToLib = new Map<string, string>()
-  for (const s of songs) {
-    const lib = linkMap.get(s.id) ?? byTitle.get(norm(s.title))
-    if (lib) songToLib.set(s.id, lib)
+  const byTitle = new Map<string, string>()
+  for (const ls of librarySongs) {
+    const k = norm(ls.title)
+    if (!byTitle.has(k)) byTitle.set(k, ls.id)
   }
-  // Built from songToLib BEFORE any version filtering — this is the whole
-  // point: a song with a library row but no reviewed sheet still has a tempo.
-  const tempoBySongId: Record<string, SongTempoData> = {}
-  for (const [songId, libId] of songToLib) {
-    tempoBySongId[songId] = { librarySongId: libId, tempoBpm: tempoByLib.get(libId) ?? null }
+  const libIds = [...new Set(songs.map(s => linkMap.get(s.id) ?? byTitle.get(norm(s.title))).filter(Boolean))] as string[]
+  if (libIds.length === 0) {
+    // No sheets to look for — but resolve anyway so tempo rows come through.
+    return resolveServiceChords(songs, { links: links ?? [], librarySongs, versions: [], prefs: [], maps: [] }, { light })
   }
-
-  const libIds = [...new Set(songToLib.values())]
-  if (libIds.length === 0) return empty
 
   // Latest reviewed version per library song (RLS hides unreviewed from members
   // anyway). In light mode we skip the (potentially large) chord bodies —
@@ -119,15 +112,6 @@ export async function fetchServiceChords(
         .not('content_chordpro', 'is', null)
         .order('reviewed_at', { ascending: false })
 
-  // All reviewed versions per library song, newest first (query is ordered).
-  type VRow = { library_song_id: string; stored_key: string | null; content_chordpro?: string | null }
-  const versionsByLib = new Map<string, VRow[]>()
-  for (const v of (versions ?? []) as VRow[]) {
-    const arr = versionsByLib.get(v.library_song_id) ?? []
-    arr.push(v)
-    versionsByLib.set(v.library_song_id, arr)
-  }
-
   const [{ data: prefs }, { data: maps }] = light ? [{ data: null }, { data: null }] : await Promise.all([
     supabase
       .from('user_scale_preferences')
@@ -140,8 +124,75 @@ export async function fetchServiceChords(
       .in('library_song_id', libIds),
   ])
 
+  return resolveServiceChords(songs, {
+    links: links ?? [],
+    librarySongs,
+    versions: (versions ?? []) as VersionRow[],
+    prefs: prefs ?? [],
+    maps: maps ?? [],
+  }, { light })
+}
+
+/** Raw rows the resolver needs — from four queries (fetchServiceChords) or
+ *  from one service_bundle() RPC (src/lib/service-bundle.ts). */
+export interface ChordResolutionRows {
+  links: Array<{ song_id: string; library_song_id: string }>
+  librarySongs: Array<{ id: string; title: string; tempo_bpm?: number | null }>
+  /** reviewed versions, NEWEST FIRST (both sources order by reviewed_at desc) */
+  versions: VersionRow[]
+  prefs: Array<{ library_song_id: string; preferred_key: string }>
+  maps: Array<{ library_song_id: string; chart_label_normalized: string; chord_section_label: string }>
+}
+export type VersionRow = { library_song_id: string; stored_key: string | null; content_chordpro?: string | null }
+
+/**
+ * Pure resolution — no I/O. Identical logic whichever way the rows arrived,
+ * which is the whole point: the bundle path can never disagree with the
+ * query path about which song has chords.
+ */
+export function resolveServiceChords(
+  songs: Array<{ id: string; title: string; scale?: string | null }>,
+  rows: ChordResolutionRows,
+  options?: { light?: boolean },
+): ServiceChords {
+  const light = options?.light === true
+  const norm = normTitle
+  const empty: ServiceChords = { chordsBySongId: {}, prefsByLibraryId: {}, tempoBySongId: {} }
+  const { links, librarySongs, versions, prefs, maps } = rows
+
+  const linkMap = new Map(links.map(l => [l.song_id, l.library_song_id]))
+  // First row wins on a duplicate title — the same row ingest picks (oldest).
+  const byTitle = new Map<string, string>()
+  for (const ls of librarySongs) {
+    const k = norm(ls.title)
+    if (!byTitle.has(k)) byTitle.set(k, ls.id)
+  }
+  const tempoByLib = new Map(librarySongs.map(ls => [ls.id, ls.tempo_bpm ?? null]))
+
+  // Resolve each service song to a library song (confirmed link wins)
+  const songToLib = new Map<string, string>()
+  for (const s of songs) {
+    const lib = linkMap.get(s.id) ?? byTitle.get(norm(s.title))
+    if (lib) songToLib.set(s.id, lib)
+  }
+  // Built from songToLib BEFORE any version filtering — this is the whole
+  // point: a song with a library row but no reviewed sheet still has a tempo.
+  const tempoBySongId: Record<string, SongTempoData> = {}
+  for (const [songId, libId] of songToLib) {
+    tempoBySongId[songId] = { librarySongId: libId, tempoBpm: tempoByLib.get(libId) ?? null }
+  }
+  if (songToLib.size === 0) return empty
+
+  // All reviewed versions per library song, newest first (input is ordered).
+  const versionsByLib = new Map<string, VersionRow[]>()
+  for (const v of versions) {
+    const arr = versionsByLib.get(v.library_song_id) ?? []
+    arr.push(v)
+    versionsByLib.set(v.library_song_id, arr)
+  }
+
   const mapsByLib = new Map<string, Record<string, string>>()
-  for (const m of maps ?? []) {
+  for (const m of maps) {
     const rec = mapsByLib.get(m.library_song_id) ?? {}
     rec[m.chart_label_normalized] = m.chord_section_label
     mapsByLib.set(m.library_song_id, rec)
@@ -172,7 +223,7 @@ export async function fetchServiceChords(
 
   return {
     chordsBySongId,
-    prefsByLibraryId: Object.fromEntries((prefs ?? []).map(p => [p.library_song_id, p.preferred_key])),
+    prefsByLibraryId: Object.fromEntries(prefs.map(p => [p.library_song_id, p.preferred_key])),
     tempoBySongId,
   }
 }
