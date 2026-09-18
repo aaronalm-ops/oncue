@@ -944,7 +944,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       {/* sm (640px) not lg: unfolded foldables report ~670–840px CSS width and
           MUST get both panes live side by side — that's the whole point. */}
       <div className={hasAnyChords ? 'min-w-full sm:min-w-0 snap-center overflow-y-auto h-full' : 'flex-1 min-h-0 overflow-y-auto'}>
-      <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
+      <div className="px-4 pt-3 pb-[248px] max-w-2xl mx-auto w-full">
         {pulsePrompt && tempoPropsFor(activeSong).tempo !== null && (
           <PulsePrompt hc={hc} onAnswer={answerPulsePrompt} className="mb-3" />
         )}
@@ -956,7 +956,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
       {/* Chords pane */}
       {hasAnyChords && (
         <div className="min-w-full sm:min-w-0 snap-center overflow-y-auto h-full sm:border-l sm:border-zinc-800">
-          <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
+          <div className="px-4 pt-3 pb-[248px] max-w-2xl mx-auto w-full">
             <ChordsPane
               key={activeSong.id}
               songTitle={activeSong.title}

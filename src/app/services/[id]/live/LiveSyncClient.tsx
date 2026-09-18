@@ -435,7 +435,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
       {impromptu ? (
         /* Impromptu live share overlays the chart until anyone ends it */
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
+          <div className="px-4 pt-3 pb-[248px] max-w-2xl mx-auto w-full">
             <div className={`mb-3 rounded-xl px-3 py-2.5 border ${hc ? 'bg-amber-100 border-amber-300' : 'bg-amber-950/60 border-amber-900'}`}>
               <p className={`text-[10px] font-bold uppercase tracking-widest ${hc ? 'text-amber-700' : 'text-amber-400'}`}>
                 ● Impromptu — shared live
@@ -468,7 +468,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
       >
       {/* sm not lg: unfolded foldables (~670–840px CSS) get both panes live */}
       <div className={hasAnyChords ? 'min-w-full sm:min-w-0 snap-center overflow-y-auto h-full' : 'flex-1 min-h-0 overflow-y-auto'}>
-      <div className="flex flex-col px-4 pt-3 pb-36 max-w-2xl mx-auto w-full gap-3">
+      <div className="flex flex-col px-4 pt-3 pb-[248px] max-w-2xl mx-auto w-full gap-3">
 
         <div className="flex items-center gap-2">
           <span className={`font-bold text-base leading-tight ${fg}`}>{currentSong?.title}</span>
@@ -581,7 +581,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
       {/* Chords pane */}
       {hasAnyChords && currentSong && (
         <div className="min-w-full sm:min-w-0 snap-center overflow-y-auto h-full sm:border-l sm:border-zinc-800">
-          <div className="px-4 pt-3 pb-36 max-w-2xl mx-auto w-full">
+          <div className="px-4 pt-3 pb-[248px] max-w-2xl mx-auto w-full">
             <ChordsPane
               key={currentSong.id}
               songTitle={currentSong.title}

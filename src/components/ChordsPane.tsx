@@ -278,6 +278,13 @@ export default function ChordsPane({ songTitle, chartLabels, chords, songScale, 
                 }`}>
                   {sec.label}
                 </p>
+                {sec.wholeSong && (
+                  <span className={`shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded ${
+                    hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-500'
+                  }`}>
+                    whole sheet
+                  </span>
+                )}
                 {modMarkerHere && (
                   <span className="shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-black">
                     {modSigned < 0 ? '↓' : '↑'} KEY {modShownKey}

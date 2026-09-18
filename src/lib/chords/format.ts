@@ -150,6 +150,25 @@ export function normalizeSectionLabel(label: string): string {
 }
 
 /** Full normalised label including number: "Verse 2" → "verse 2" */
+/**
+ * Does this CHART label mean "play the whole song" rather than one section?
+ *
+ * Charts written for rehearsal often say FULL SONG instead of listing
+ * sections, and no chord sheet will ever have a section by that name — so it
+ * matched nothing and the pane offered a "map to a sheet section…" dropdown
+ * for something that isn't a section.
+ *
+ * Deliberately narrow. "FULL BAND" is a real chart label meaning everyone
+ * plays, NOT the whole song, so anything following full/whole/entire/complete
+ * has to be song/chart/sheet — or absent entirely.
+ */
+export function isWholeSongLabel(label: string): boolean {
+  const full = normalizeSectionLabelFull(label)
+  return /^(full|whole|entire|complete)$/.test(full)
+    || /^(full|whole|entire|complete)\s+(song|chart|sheet)\b/.test(full)
+    || /^song$/.test(full)
+}
+
 export function normalizeSectionLabelFull(label: string): string {
   return label
     .toLowerCase()
@@ -363,6 +382,19 @@ export function reorderBodyToChart(
     const keyCue = shifting ? ` · KEY ${signed > 0 ? 'UP' : 'DOWN'} ${Math.abs(signed)}` : ''
 
     if (pool.length === 0) {
+      // Same whole-song handling as the pane: emit the chart's own wording as
+      // a group header, then the entire sheet under it.
+      if (isWholeSongLabel(chartLabel) && sections.length > 0) {
+        out.push(`# ${chartLabel}${keyCue}`)
+        for (const s of sections) {
+          out.push(`# ${s.label}`)
+          if (s.content) out.push(s.content)
+          used.add(s.order_index)
+        }
+        out.push('')
+        matched++
+        continue
+      }
       unmatched.push(chartLabel)
       continue
     }
@@ -405,6 +437,8 @@ export function reorderBodyToChart(
 export interface ChartSectionChords {
   label: string // the chart's label (conductor's wording)
   content: string | null // matched chord content, or null
+  /** true when the chart said FULL SONG and this carries the entire sheet */
+  wholeSong?: boolean
 }
 
 export interface ChartChordsMap {
@@ -450,7 +484,18 @@ export function mapChartSectionsToChords(
     if (pool.length === 0) {
       pool = byFull.get(full)?.length ? byFull.get(full)! : (byBase.get(base) ?? [])
     }
-    if (pool.length === 0) return { label: chartLabel, content: null }
+    if (pool.length === 0) {
+      // "FULL SONG" and friends: hand over the entire sheet, and consume every
+      // section so the same content doesn't ALSO appear under "not in this
+      // week's chart". Checked after the label match on purpose — a sheet that
+      // genuinely has a section called "Full Song" should win.
+      if (isWholeSongLabel(chartLabel) && chordSections.length > 0) {
+        for (const cs of chordSections) used.add(cs.order_index)
+        matched++
+        return { label: chartLabel, content: body.trim() || null, wholeSong: true }
+      }
+      return { label: chartLabel, content: null }
+    }
 
     const cursorKey = `p:${normalizeSectionLabelFull(pool[0].label)}`
     const cursor = cursors.get(cursorKey) ?? 0
