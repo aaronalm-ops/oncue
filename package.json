@@ -11,6 +11,8 @@
     "test:chords": "tsx scripts/test-chords.ts"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.5",
+    "@grpc/proto-loader": "^0.8.1",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.0",
     "@vercel/analytics": "^2.0.1",
@@ -22,7 +24,6 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "unpdf": "^1.6.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -31,6 +32,7 @@
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "unpdf": "^1.6.2"
   }
 }

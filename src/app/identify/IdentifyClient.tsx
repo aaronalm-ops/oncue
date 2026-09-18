@@ -10,6 +10,7 @@ import {
 } from '@/lib/audio/key-detect'
 import { ALL_KEYS } from '@/lib/chords/format'
 import { BOTTOM_NAV_HEIGHT } from '@/components/BottomNav'
+import { WAV_RATE, concatFloat32, downsample, encodeWav, peakOf } from '@/lib/audio/wav'
 
 /* ------------------------------------------------------------------ */
 /* Web Speech API — not in TS's DOM lib on every config; declare the   */
@@ -53,21 +54,27 @@ interface Candidate {
 interface Props {
   target: { id: string; label: string; isToday: boolean } | null
   backHref: string
+  /** 'server' = Whisper via /api/identify/transcribe (needs a key in Vercel); 'browser' = Web Speech API */
+  stt: 'server' | 'browser'
 }
 
-type Phase = 'idle' | 'key' | 'words' | 'done'
+type Phase = 'idle' | 'key' | 'words' | 'listening' | 'done'
 
 const MAX_LISTEN_MS = 30_000
-const KEY_PHASE_MS = 4_500      // mic goes to key detection first, then to voice — never both at once
+const KEY_PHASE_MS = 4_500      // browser mode: mic goes to key detection first, then to voice — never both at once
+const CLIP_MS = 5_000           // server mode: length of each clip sent to Whisper
 const MIN_KEY_MS = 2_000        // don't call a key before this much audio
 const QUERY_WORDS = 10          // rolling window sent to identify_song
 const STRONG = 0.6              // "that's the one" threshold for the UI
 const AUTO_STOP_SCORE = 0.85    // stop early when the match is unmistakable
 
+/** Wall clock for the async listen loops (event-driven, never during render). */
+const nowMs = () => Date.now()
+
 let clientSingleton: ReturnType<typeof createClient> | null = null
 const getClient = () => (clientSingleton ??= createClient())
 
-export default function IdentifyClient({ target, backHref }: Props) {
+export default function IdentifyClient({ target, backHref, stt }: Props) {
   const router = useRouter()
   const srSupported = useMemo(() => getSpeechRecognition() !== null, [])
 
@@ -84,6 +91,7 @@ export default function IdentifyClient({ target, backHref }: Props) {
   const [chosen, setChosen] = useState<Candidate | null>(null)
   const [queries, setQueries] = useState(0)      // diagnostics: lookups made this listen
   const [voiceNote, setVoiceNote] = useState<string | null>(null) // diagnostics: what the recogniser said
+  const [clipsPending, setClipsPending] = useState(0)               // server mode: clips still transcribing
 
   // Everything that must survive re-renders without re-running effects
   const recRef = useRef<SpeechRecognitionLike | null>(null)
@@ -186,29 +194,9 @@ export default function IdentifyClient({ target, backHref }: Props) {
       const Ctx = (window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)
       ctx = new Ctx()
       audioCtxRef.current = ctx
-      const src = ctx.createMediaStreamSource(stream)
-      const analyser = ctx.createAnalyser()
-      analyser.fftSize = 8192
-      analyser.smoothingTimeConstant = 0.3
-      src.connect(analyser)
-      const db = new Float32Array(analyser.frequencyBinCount)
-      const power = new Float32Array(analyser.frequencyBinCount)
-      chromaRef.current.fill(0)
-      const t0 = Date.now()
-
-      await new Promise<void>(resolve => {
-        const tick = window.setInterval(() => {
-          if (!listeningRef.current || Date.now() - t0 >= KEY_PHASE_MS) { clearInterval(tick); resolve(); return }
-          if (ctx!.state !== 'running') { ctx!.resume().catch(() => {}); return }
-          analyser.getFloatFrequencyData(db)
-          let peak = -Infinity
-          for (let i = 0; i < db.length; i++) { power[i] = 10 ** (db[i] / 10); if (db[i] > peak) peak = db[i] }
-          if (peak < -75) return // silence — don't let the noise floor vote
-          accumulateChroma(power, ctx!.sampleRate, analyser.fftSize, chromaRef.current)
-          if (Date.now() - t0 >= MIN_KEY_MS) setKeyEst(estimateKey(chromaRef.current))
-        }, 100)
-        timersRef.current.push(tick)
-      })
+      const t0 = nowMs()
+      attachKeyAnalyser(stream, ctx, () => nowMs() - t0 < KEY_PHASE_MS)
+      while (listeningRef.current && nowMs() - t0 < KEY_PHASE_MS) await new Promise(r => setTimeout(r, 100))
       setKeyEst(estimateKey(chromaRef.current))
     } catch (e) {
       const name = (e as { name?: string })?.name
@@ -219,6 +207,122 @@ export default function IdentifyClient({ target, backHref }: Props) {
       streamRef.current = null
       await ctx?.close().catch(() => {})
       audioCtxRef.current = null
+    }
+  }
+
+  /** Web Audio analyser on a live stream → feeds chroma every 100ms until stopped. */
+  function attachKeyAnalyser(stream: MediaStream, ctx: AudioContext, until: () => boolean): void {
+    const src = ctx.createMediaStreamSource(stream)
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = 8192
+    analyser.smoothingTimeConstant = 0.3
+    src.connect(analyser)
+    const db = new Float32Array(analyser.frequencyBinCount)
+    const power = new Float32Array(analyser.frequencyBinCount)
+    chromaRef.current.fill(0)
+    const t0 = Date.now()
+    const tick = window.setInterval(() => {
+      if (!listeningRef.current || !until()) { clearInterval(tick); return }
+      if (ctx.state !== 'running') { ctx.resume().catch(() => {}); return }
+      analyser.getFloatFrequencyData(db)
+      let peak = -Infinity
+      for (let i = 0; i < db.length; i++) { power[i] = 10 ** (db[i] / 10); if (db[i] > peak) peak = db[i] }
+      if (peak < -75) return // silence — don't let the noise floor vote
+      accumulateChroma(power, ctx.sampleRate, analyser.fftSize, chromaRef.current)
+      if (Date.now() - t0 >= MIN_KEY_MS) setKeyEst(estimateKey(chromaRef.current))
+    }, 100)
+    timersRef.current.push(tick)
+  }
+
+  /* ---------------- server mode: one mic stream, key + Whisper clips ---------------- */
+
+  async function transcribeClip(blob: Blob, index: number): Promise<void> {
+    setClipsPending(n => n + 1)
+    try {
+      const fd = new FormData()
+      fd.append('audio', blob, 'clip.wav')
+      fd.append('sampleRate', String(WAV_RATE))
+      const res = await fetch('/api/identify/transcribe', { method: 'POST', body: fd })
+      if (res.status === 501) {
+        setVoiceNote('no transcription key — using browser voice')
+        return
+      }
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({})) as { error?: string }
+        setError(j.error ?? `Transcription failed (${res.status})`)
+        return
+      }
+      const { text } = (await res.json()) as { text: string }
+      setVoiceNote(`clip ${index + 1} ✓`)
+      if (!text) return
+      finalsRef.current = (finalsRef.current + ' ' + text).trim()
+      setTranscript(finalsRef.current)
+      scheduleQuery(finalsRef.current)
+    } catch (e) {
+      setError(`Transcription failed: ${(e as Error).message}`)
+    } finally {
+      setClipsPending(n => n - 1)
+    }
+  }
+
+  /**
+   * ONE getUserMedia stream for the whole listen. Key detection reads it
+   * continuously (more audio = steadier key); a ScriptProcessor taps the
+   * raw samples and every CLIP_MS they're packed into a 16 kHz WAV and sent
+   * for transcription. No MediaRecorder (codec roulette across phones), no
+   * SpeechRecognition (fights for the mic) — one plain audio pipeline.
+   */
+  async function runRecordingSession(): Promise<void> {
+    let stream: MediaStream | null = null
+    let ctx: AudioContext | null = null
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      })
+      if (!listeningRef.current) { stream.getTracks().forEach(t => t.stop()); return }
+      streamRef.current = stream
+      const Ctx = (window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)
+      ctx = new Ctx()
+      audioCtxRef.current = ctx
+      attachKeyAnalyser(stream, ctx, () => streamRef.current === stream)
+
+      // Raw sample tap. ScriptProcessor is deprecated but runs everywhere,
+      // and needs to be wired to the destination (muted) to actually fire.
+      const src = ctx.createMediaStreamSource(stream)
+      const tap = ctx.createScriptProcessor(4096, 1, 1)
+      const mute = ctx.createGain(); mute.gain.value = 0
+      let chunks: Float32Array[] = []
+      tap.onaudioprocess = e => { if (streamRef.current === stream) chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))) }
+      src.connect(tap); tap.connect(mute); mute.connect(ctx.destination)
+
+      setPhase('listening')
+      setVoiceNote('recording')
+
+      let clip = 0
+      const flush = () => {
+        if (!chunks.length) return
+        const raw = concatFloat32(chunks); chunks = []
+        if (peakOf(raw) < 0.01) { setVoiceNote(`clip ${clip + 1}: silence`); clip++; return } // nothing to hear
+        const wav = encodeWav(downsample(raw, ctx!.sampleRate, WAV_RATE), WAV_RATE)
+        transcribeClip(wav, clip++)
+      }
+      let t0 = Date.now()
+      while (listeningRef.current && streamRef.current === stream) {
+        await new Promise(r => setTimeout(r, 100))
+        if (Date.now() - t0 >= CLIP_MS) { flush(); t0 = Date.now() }
+      }
+      flush() // whatever was left when we stopped
+      tap.disconnect(); src.disconnect(); mute.disconnect()
+    } catch (e) {
+      const name = (e as { name?: string })?.name
+      if (name === 'NotAllowedError') setError('Microphone access was blocked. Allow the mic for OnCue in your browser settings, or type a lyric below.')
+      else setError(`Couldn’t use the microphone (${name ?? 'unknown'}). Type a lyric below.`)
+      stopAll('done')
+    } finally {
+      stream?.getTracks().forEach(t => t.stop())
+      if (streamRef.current === stream) streamRef.current = null
+      await ctx?.close().catch(() => {})
+      if (audioCtxRef.current === ctx) audioCtxRef.current = null
     }
   }
 
@@ -286,6 +390,7 @@ export default function IdentifyClient({ target, backHref }: Props) {
     setKeyDetectOff(null)
     setVoiceNote(null)
     setQueries(0)
+    setClipsPending(0)
     setChosen(null)
     setTranscript(''); setInterim('')
     finalsRef.current = ''; interimRef.current = ''; lastQueryRef.current = ''; bestScoreRef.current = 0
@@ -302,6 +407,10 @@ export default function IdentifyClient({ target, backHref }: Props) {
     }, 250)
     timersRef.current.push(clock)
 
+    if (stt === 'server') {
+      await runRecordingSession()
+      return
+    }
     await runKeyPhase()
     if (!listeningRef.current) return
     setPhase('words')
@@ -355,7 +464,7 @@ export default function IdentifyClient({ target, backHref }: Props) {
     router.push(`/services/${target.id}/live`)
   }
 
-  const listening = phase === 'key' || phase === 'words'
+  const listening = phase === 'key' || phase === 'words' || phase === 'listening'
   const secs = Math.floor(elapsed / 1000)
   const chosenMode: Mode = modeOfKey(goKey) ?? modeOfKey(chosen?.stored_key) ?? detected?.mode ?? 'major'
 
@@ -375,7 +484,7 @@ export default function IdentifyClient({ target, backHref }: Props) {
 
         <h1 className="text-2xl font-bold leading-tight">Which song is this?</h1>
         <p className="text-zinc-500 text-sm mt-1">
-          Hold the phone toward the singer. A few words is enough.
+          Hold the phone toward the singer — a line of the lyrics is enough. Speaking the words works even better than singing them.
           {target
             ? <> Goes live on <span className="text-zinc-300">{target.isToday ? 'today’s service' : `${target.label}’s service`}</span>.</>
             : <> No service yet — you can still open the chords.</>}
@@ -410,8 +519,9 @@ export default function IdentifyClient({ target, backHref }: Props) {
           <p className="mt-4 text-sm font-semibold text-zinc-300">
             {phase === 'key' && 'Listening for the key…'}
             {phase === 'words' && `Listening for words · 0:${String(secs).padStart(2, '0')}`}
+            {phase === 'listening' && `Listening · 0:${String(secs).padStart(2, '0')}`}
             {phase === 'idle' && (srSupported ? 'Tap to listen' : 'Voice isn’t available in this browser')}
-            {phase === 'done' && (top ? 'Here’s what I heard' : 'Nothing matched — try again closer to the singer')}
+            {phase === 'done' && (clipsPending > 0 ? 'Working out the words…' : top ? 'Here’s what I heard' : 'Nothing matched — try again closer to the singer')}
           </p>
           {(transcript || interim) && (
             <p className="mt-2 text-center text-xs text-zinc-500 italic leading-relaxed max-w-xs">
@@ -422,6 +532,7 @@ export default function IdentifyClient({ target, backHref }: Props) {
             <p className="mt-2 text-[10px] text-zinc-700 tabular-nums">
               {[transcript, interim].join(' ').trim().split(/\s+/).filter(Boolean).length} words heard · {queries} lookups
               {voiceNote ? ` · ${voiceNote}` : ''}
+              {keyEst ? ` · key ${keyEst.ranked.slice(0, 3).map(c => `${keyLabel(c.tonic, c.mode)} ${c.r.toFixed(2)}`).join(' / ')}` : ''}
             </p>
           )}
         </div>
@@ -443,6 +554,8 @@ export default function IdentifyClient({ target, backHref }: Props) {
               <p className="text-[11px] text-zinc-600">Key detection off — {keyDetectOff}</p>
             ) : phase === 'key' ? (
               <p className="text-[11px] text-zinc-600">Hearing the key first (4s), then the words…</p>
+            ) : phase === 'listening' ? (
+              <p className="text-[11px] text-zinc-600">Listening for the key…</p>
             ) : null}
           </div>
         )}

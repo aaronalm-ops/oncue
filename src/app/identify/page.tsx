@@ -24,10 +24,15 @@ export default async function IdentifyPage({
   // Today's service, else the next one, else the last — where "go live" lands.
   const target = await findLiveTarget(supabase)
 
+  // Whisper (server) when a key is configured — far better on SINGING than the
+  // browser recogniser. Without a key the browser path still works.
+  const stt: 'server' | 'browser' = process.env.NVIDIA_API_KEY || process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY ? 'server' : 'browser'
+
   return (
     <IdentifyClient
       target={target ? { id: target.id, label: target.label, isToday: target.isToday } : null}
       backHref={back}
+      stt={stt}
     />
   )
 }
