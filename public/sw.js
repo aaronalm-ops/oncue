@@ -1,4 +1,4 @@
-const CACHE = 'oncue-v8'
+const CACHE = 'oncue-v9'
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -34,7 +34,29 @@ self.addEventListener('fetch', e => {
     return
   }
 
-  // Cache-first for static assets
+  // Identity files — manifest + app icons — are NEVER cache-first. Chrome
+  // decides whether the installed app's icon/splash needs updating by
+  // re-fetching these through this worker and hashing them; serving a
+  // cached copy meant a new logo could never reach the home screen (the
+  // cache said nothing changed). Network-first, cache only as offline fallback.
+  if (
+    url.pathname === '/manifest.webmanifest' ||
+    url.pathname === '/manifest.json' ||
+    /^\/(icon-[^/]+|apple-touch-icon)\.png$/.test(url.pathname)
+  ) {
+    e.respondWith(
+      fetch(request).then(res => {
+        if (res.ok) {
+          const clone = res.clone()
+          caches.open(CACHE).then(cache => cache.put(request, clone))
+        }
+        return res
+      }).catch(() => caches.match(request))
+    )
+    return
+  }
+
+  // Cache-first for static assets (hashed build files, fonts, illustrations)
   if (
     url.pathname.startsWith('/_next/static/') ||
     url.pathname.match(/\.(png|svg|ico|woff2?)$/)

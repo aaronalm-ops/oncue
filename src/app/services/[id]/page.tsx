@@ -70,7 +70,7 @@ export default async function ServicePage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="max-w-lg mx-auto px-4 pt-12 pb-24 space-y-8">
+      <div className="max-w-lg mx-auto px-4 pt-12 pb-32 space-y-8">
 
         <div>
           <Link href="/services" className="inline-flex items-center gap-2 mb-5 text-zinc-500 text-sm active:text-zinc-300 transition-colors">

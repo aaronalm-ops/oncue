@@ -83,7 +83,7 @@ export default function StatsClient({ stats, role, error }: Props) {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="max-w-lg mx-auto px-4 pt-10 pb-24">
+      <div className="max-w-lg mx-auto px-4 pt-10 pb-32">
 
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">

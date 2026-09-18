@@ -56,7 +56,12 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
 
   // A library song was pushed live mid-service — fetch its sheet and overlay it
   async function applyImpromptu(libId: string | null, sharedKey: string | null) {
-    if (libId === impromptuRef.current) return
+    if (libId === impromptuRef.current) {
+      // Same song, corrected key (identify → "the leader moved to A") — the
+      // sheet is already here; just re-key it for everyone.
+      setImpromptu(cur => (cur && cur.librarySongId === libId && cur.sharedKey !== sharedKey ? { ...cur, sharedKey } : cur))
+      return
+    }
     impromptuRef.current = libId
     if (libId === null) {
       setImpromptu(null)
@@ -443,10 +448,14 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
               <p className={`text-lg font-bold leading-tight ${fg}`}>{impromptu.title}</p>
             </div>
             <ChordSheetViewer
-              key={impromptu.librarySongId}
+              key={`${impromptu.librarySongId}:${impromptu.sharedKey ?? ''}`}
               body={impromptu.body}
               storedKey={impromptu.storedKey}
-              initialKey={prefsByLibraryId[impromptu.librarySongId] ?? impromptu.sharedKey}
+              // A shared key is the key the leader is ACTUALLY singing in right
+              // now (detected or chosen on /identify) — it beats a personal
+              // preference. Until v21 every share carried null, so nothing
+              // changes for the old "share live" button.
+              initialKey={impromptu.sharedKey ?? prefsByLibraryId[impromptu.librarySongId]}
               librarySongId={impromptu.librarySongId}
               userId={userId}
               highContrast={hc}
@@ -655,8 +664,13 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
               {instr}
             </button>
           ))}
+          {/* Leader went off-chart? Identify the song and push it live from here. */}
+          <Link href={`/identify?from=/services/${serviceId}/live`}
+            className={`ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-amber-200 text-amber-900' : 'bg-amber-950 text-amber-400'}`}>
+            ♪ Identify
+          </Link>
           <button onClick={toggleContrast}
-            className={`ml-auto shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
+            className={`shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wide active:scale-95 ${hc ? 'bg-black text-white' : 'bg-zinc-800 text-zinc-400'}`}>
             {hc ? 'Stage off' : 'Stage'}
           </button>
         </div>

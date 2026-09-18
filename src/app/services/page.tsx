@@ -1,7 +1,6 @@
 import { createClient, getAuthUser } from '@/lib/supabase/server'
 import Logo from '@/components/Logo'
 import UploadButton from '@/components/UploadButton'
-import UserMenu from '@/components/UserMenu'
 import ServicesClient from './ServicesClient'
 import ProfileCompletionModal from '@/components/ProfileCompletionModal'
 import Link from 'next/link'
@@ -24,7 +23,6 @@ export default async function ServicesPage() {
   ])
   const role = (profile?.role ?? 'member') as AppRole
   const isPrivileged = role === 'master' || role === 'admin'
-  const canAccessLibrary = true // v6: chords are open to every member
 
   // One-time prompt for members who signed up before preferred-scale + teams.
   const p = profile as { instrument?: string | null; display_name?: string | null; teams?: string[]; profile_completed_at?: string | null } | null
@@ -46,7 +44,7 @@ export default async function ServicesPage() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="max-w-lg mx-auto px-4 pt-10 pb-24">
+      <div className="max-w-lg mx-auto px-4 pt-10 pb-32">
 
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
@@ -58,21 +56,9 @@ export default async function ServicesPage() {
             <h1 className="text-xl font-bold tracking-tight">OnCue</h1>
           </Link>
 
-          <div className="flex items-center gap-2.5">
-            {canAccessLibrary && (
-              <Link
-                href="/library"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 text-xs font-semibold active:bg-zinc-800 transition-colors"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
-                </svg>
-                Chords
-              </Link>
-            )}
-            {isPrivileged && <UploadButton />}
-            <UserMenu instrument={profile?.instrument ?? null} role={role} displayName={p?.display_name ?? null} />
-          </div>
+          {/* Chords + account moved to the bottom bar (v22). Upload stays —
+              it's the one action that belongs to this page. */}
+          {isPrivileged && <UploadButton />}
         </div>
 
         <ServicesClient

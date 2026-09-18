@@ -1,5 +1,6 @@
 import { redirect, notFound } from 'next/navigation'
 import { createClient, getAuthUser } from '@/lib/supabase/server'
+import { findLiveTarget } from '@/lib/live-target'
 import SongDetailClient from './SongDetailClient'
 import type { AppRole } from '@/lib/types'
 
@@ -13,8 +14,7 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
   // stage. P7: version BODIES are no longer fetched here — the client lazy-
   // loads the one you open (a song with 3 versions was shipping 3 full sheets
   // on every visit).
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date())
-  const [{ data: profile }, { data: song }, { data: pref }, { data: todayService }] = await Promise.all([
+  const [{ data: profile }, { data: song }, { data: pref }, liveTarget] = await Promise.all([
     supabase.from('profiles').select('role, instrument, preferred_key').eq('id', user.id).single(),
     supabase
       .from('library_songs')
@@ -27,7 +27,8 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
       .eq('user_id', user.id)
       .eq('library_song_id', id)
       .maybeSingle(),
-    supabase.from('services').select('id').eq('service_date', today).maybeSingle(),
+    // today's service, else the next one, else the last one (see live-target.ts)
+    findLiveTarget(supabase),
   ])
   if (!song) notFound()
 
@@ -37,11 +38,11 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
   const canManage = true
 
   let sharedLiveNow = false
-  if (todayService) {
+  if (liveTarget) {
     const { data: st } = await supabase
       .from('session_state')
       .select('impromptu_library_song_id')
-      .eq('service_id', todayService.id)
+      .eq('service_id', liveTarget.id)
       .maybeSingle()
     sharedLiveNow = (st as { impromptu_library_song_id?: string | null } | null)?.impromptu_library_song_id === id
   }
@@ -70,7 +71,7 @@ export default async function LibrarySongPage({ params }: { params: Promise<{ id
       perSongKey={pref?.preferred_key ?? null}
       globalPreferredKey={(profile as { preferred_key?: string | null } | null)?.preferred_key ?? null}
       instrument={(profile as { instrument?: string | null } | null)?.instrument ?? null}
-      todayServiceId={todayService?.id ?? null}
+      liveTarget={liveTarget ? { id: liveTarget.id, label: liveTarget.label, isToday: liveTarget.isToday } : null}
       sharedLiveNow={sharedLiveNow}
     />
   )

@@ -146,7 +146,7 @@ export default function LibraryClient({ songs: initial, role, pendingUploads, at
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="max-w-lg mx-auto px-4 pt-10 pb-24">
+      <div className="max-w-lg mx-auto px-4 pt-10 pb-32">
 
         {/* Header */}
         <div className="flex items-center justify-between mb-6">

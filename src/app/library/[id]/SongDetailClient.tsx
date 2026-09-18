@@ -24,11 +24,12 @@ interface Props {
   perSongKey: string | null // saved per-song preference (overrides global)
   globalPreferredKey: string | null // profile default; null = actual
   instrument: string | null
-  todayServiceId: string | null
+  /** where "share live" lands: today's service, else next, else last */
+  liveTarget: { id: string; label: string; isToday: boolean } | null
   sharedLiveNow: boolean
 }
 
-export default function SongDetailClient({ song, versions: versionsProp, canManage, canDelete = false, userId, perSongKey, globalPreferredKey, instrument, todayServiceId, sharedLiveNow }: Props) {
+export default function SongDetailClient({ song, versions: versionsProp, canManage, canDelete = false, userId, perSongKey, globalPreferredKey, instrument, liveTarget, sharedLiveNow }: Props) {
   // P3: local copies instead of router.refresh() round-trips; kept in sync
   // with the server prop so refreshes from elsewhere still win. Lazy-loaded
   // chord bodies are preserved across prop syncs.
@@ -79,7 +80,7 @@ export default function SongDetailClient({ song, versions: versionsProp, canMana
   const hasReviewed = versions.some(v => v.reviewed_at)
 
   async function toggleShareLive() {
-    if (!todayServiceId) return
+    if (!liveTarget) return
     setShareBusy(true)
     try {
       const { createClient: createBrowserClient } = await import('@/lib/supabase/client')
@@ -88,7 +89,7 @@ export default function SongDetailClient({ song, versions: versionsProp, canMana
       // session_state row doesn't exist yet (pre-v5 services) and a full upsert
       // would reset the live position. The RPC touches only the impromptu cols.
       const { error } = await supabase.rpc('set_impromptu', {
-        p_service_id: todayServiceId,
+        p_service_id: liveTarget.id,
         p_library_song_id: isSharedLive ? null : song.id,
         p_key: null,
       })
@@ -163,7 +164,7 @@ export default function SongDetailClient({ song, versions: versionsProp, canMana
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="max-w-lg mx-auto px-4 pt-10 pb-24">
+      <div className="max-w-lg mx-auto px-4 pt-10 pb-32">
 
         <div className="flex items-center gap-2 mb-1">
           <Link href="/library"
@@ -227,17 +228,15 @@ export default function SongDetailClient({ song, versions: versionsProp, canMana
         </div>
 
         {/* Impromptu live share — push this song onto everyone's Live view now.
-            This used to render ONLY when there was a service dated today AND a
-            reviewed sheet, so on any other day it simply vanished and read as a
-            bug ("the live option disappeared"). It now always renders; when it
-            can't act it's disabled and says why. The today-only rule itself is
-            right — an impromptu is pushed into a live session_state, and you
-            don't want that landing on a future service. */}
+            Lands on today's service when there is one, otherwise the NEXT
+            service (practice is for the coming one), otherwise the last. The
+            button always says where it's going. Only a library with no
+            services at all blocks it. */}
         {(() => {
           const blocker = !hasReviewed
             ? 'Add chords to this song first — nothing to put on screen yet'
-            : !todayServiceId
-              ? 'Only on a service day — there’s no service dated today'
+            : !liveTarget
+              ? 'Create a service first — there’s nothing to go live into'
               : null
           return (
             <div className="mt-4">
@@ -253,7 +252,9 @@ export default function SongDetailClient({ song, versions: versionsProp, canMana
                   ? 'Working…'
                   : isSharedLive
                     ? 'Live now on everyone’s screen — tap to end'
-                    : 'Share live to today’s service'}
+                    : liveTarget?.isToday
+                      ? 'Share live to today’s service'
+                      : `Share live to ${liveTarget?.label ?? 'the next'}’s service`}
               </button>
               {blocker && (
                 <p className="mt-1.5 text-center text-[11px] text-zinc-600">{blocker}</p>
