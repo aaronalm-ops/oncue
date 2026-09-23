@@ -11,6 +11,7 @@ import {
 import { ALL_KEYS } from '@/lib/chords/format'
 import { BOTTOM_NAV_HEIGHT } from '@/components/BottomNav'
 import { WAV_RATE, concatFloat32, downsample, encodeWav, peakOf } from '@/lib/audio/wav'
+import { matchKeyToSong, songChordProfile } from '@/lib/audio/song-key'
 
 /* ------------------------------------------------------------------ */
 /* Web Speech API — not in TS's DOM lib on every config; declare the   */
@@ -84,6 +85,10 @@ export default function IdentifyClient({ target, backHref, stt }: Props) {
   const [elapsed, setElapsed] = useState(0)
   const [candidates, setCandidates] = useState<Record<string, Candidate>>({})
   const [keyEst, setKeyEst] = useState<KeyEstimate | null>(null)
+  const [chromaSnap, setChromaSnap] = useState<Float64Array | null>(null)
+  /** the identified song's chord profile (in its sheet key) — song-aware key detection */
+  const [sheet, setSheet] = useState<{ libId: string; storedKey: string; profile: Float64Array } | null>(null)
+  const sheetCacheRef = useRef(new Map<string, { storedKey: string; profile: Float64Array } | null>())
   const [keyDetectOff, setKeyDetectOff] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [typed, setTyped] = useState('')
@@ -198,6 +203,7 @@ export default function IdentifyClient({ target, backHref, stt }: Props) {
       attachKeyAnalyser(stream, ctx, () => nowMs() - t0 < KEY_PHASE_MS)
       while (listeningRef.current && nowMs() - t0 < KEY_PHASE_MS) await new Promise(r => setTimeout(r, 100))
       setKeyEst(estimateKey(chromaRef.current))
+      setChromaSnap(Float64Array.from(chromaRef.current))
     } catch (e) {
       const name = (e as { name?: string })?.name
       setKeyDetectOff(name === 'NotAllowedError' ? 'mic blocked' : `not available (${name ?? 'unknown'})`)
@@ -229,7 +235,10 @@ export default function IdentifyClient({ target, backHref, stt }: Props) {
       for (let i = 0; i < db.length; i++) { power[i] = 10 ** (db[i] / 10); if (db[i] > peak) peak = db[i] }
       if (peak < -75) return // silence — don't let the noise floor vote
       accumulateChroma(power, ctx.sampleRate, analyser.fftSize, chromaRef.current)
-      if (Date.now() - t0 >= MIN_KEY_MS) setKeyEst(estimateKey(chromaRef.current))
+      if (Date.now() - t0 >= MIN_KEY_MS) {
+        setKeyEst(estimateKey(chromaRef.current))
+        setChromaSnap(Float64Array.from(chromaRef.current))
+      }
     }, 100)
     timersRef.current.push(tick)
   }
@@ -387,6 +396,8 @@ export default function IdentifyClient({ target, backHref, stt }: Props) {
     setError(null)
     setCandidates({})
     setKeyEst(null)
+    setChromaSnap(null)
+    setSheet(null)
     setKeyDetectOff(null)
     setVoiceNote(null)
     setQueries(0)
@@ -433,16 +444,60 @@ export default function IdentifyClient({ target, backHref, stt }: Props) {
   const ranked = useMemo(() => Object.values(candidates).sort((a, b) => b.score - a.score), [candidates])
   const top = ranked[0] ?? null
 
-  // Detected key, snapped to the identified song's mode when we know it.
+  // Once we know WHICH song, fetch its chord sheet (latest reviewed) and
+  // build a note profile — the key question becomes "which transposition of
+  // this song fits the room?", which a lone voice can answer far better
+  // than "which key is this?" (a melody on the 3rd read as C# for a song in A).
+  const topId = top?.library_song_id ?? null
+  useEffect(() => {
+    if (!topId) return
+    const cached = sheetCacheRef.current.get(topId)
+    if (cached !== undefined) { setSheet(cached ? { libId: topId, ...cached } : null); return }
+    let cancelled = false
+    getClient()
+      .from('song_versions')
+      .select('stored_key, content_chordpro')
+      .eq('library_song_id', topId)
+      .not('reviewed_at', 'is', null)
+      .not('content_chordpro', 'is', null)
+      .order('reviewed_at', { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        const v = data?.[0] as { stored_key: string | null; content_chordpro: string | null } | undefined
+        const profile = v?.content_chordpro ? songChordProfile(v.content_chordpro) : null
+        const entry = profile && v?.stored_key ? { storedKey: v.stored_key, profile } : null
+        sheetCacheRef.current.set(topId, entry)
+        if (!cancelled) setSheet(entry ? { libId: topId, ...entry } : null)
+      })
+    return () => { cancelled = true }
+  }, [topId])
+
   const detected = useMemo(() => {
+    // Song-aware first: the identified sheet's chords, rotated to fit the room.
+    if (sheet && chromaSnap && sheet.libId === topId) {
+      const m = matchKeyToSong(chromaSnap, sheet.profile, sheet.storedKey)
+      if (m) {
+        return {
+          label: m.key, mode: m.mode, confidence: m.confidence,
+          source: 'song' as const, snapped: false, sheetMode: m.mode,
+          alt: m.ranked[1]?.key ?? null,
+          ranking: m.ranked.slice(0, 3).map(c => `${c.key} ${c.r.toFixed(2)}`).join(' / '),
+        }
+      }
+    }
+    // Generic fallback (no sheet yet / no chords on it): KK profiles, snapped to the sheet's mode.
     if (!keyEst) return null
     const sheetMode: Mode | null = modeOfKey(top?.stored_key)
     const pick = sheetMode ? snapToMode(keyEst, sheetMode) : keyEst.ranked[0]
     const snapped = sheetMode !== null && (pick.tonic !== keyEst.tonic || pick.mode !== keyEst.mode)
-    // Runner-up that isn't just the relative of the pick — the honest "or…"
     const alt = keyEst.ranked.find(c => !(c.tonic === pick.tonic && c.mode === pick.mode) && !(c.tonic === (pick.mode === 'major' ? (pick.tonic + 9) % 12 : (pick.tonic + 3) % 12) && c.mode !== pick.mode))
-    return { label: keyLabel(pick.tonic, pick.mode), mode: pick.mode, confidence: keyEst.confidence, snapped, sheetMode, alt: alt ? keyLabel(alt.tonic, alt.mode) : null }
-  }, [keyEst, top])
+    return {
+      label: keyLabel(pick.tonic, pick.mode), mode: pick.mode, confidence: keyEst.confidence,
+      source: 'generic' as const, snapped, sheetMode,
+      alt: alt ? keyLabel(alt.tonic, alt.mode) : null,
+      ranking: keyEst.ranked.slice(0, 3).map(c => `${keyLabel(c.tonic, c.mode)} ${c.r.toFixed(2)}`).join(' / '),
+    }
+  }, [sheet, chromaSnap, topId, keyEst, top])
 
   /* ---------------- go live ---------------- */
 
@@ -484,10 +539,9 @@ export default function IdentifyClient({ target, backHref, stt }: Props) {
 
         <h1 className="text-2xl font-bold leading-tight">Which song is this?</h1>
         <p className="text-zinc-500 text-sm mt-1">
-          Hold the phone toward the singer — a line of the lyrics is enough. Speaking the words works even better than singing them.
           {target
-            ? <> Goes live on <span className="text-zinc-300">{target.isToday ? 'today’s service' : `${target.label}’s service`}</span>.</>
-            : <> No service yet — you can still open the chords.</>}
+            ? <>Goes live on <span className="text-zinc-300">{target.isToday ? 'today’s service' : `${target.label}’s service`}</span>.</>
+            : 'No service yet — you can still open the chords.'}
         </p>
 
         {/* The button */}
@@ -532,7 +586,7 @@ export default function IdentifyClient({ target, backHref, stt }: Props) {
             <p className="mt-2 text-[10px] text-zinc-700 tabular-nums">
               {[transcript, interim].join(' ').trim().split(/\s+/).filter(Boolean).length} words heard · {queries} lookups
               {voiceNote ? ` · ${voiceNote}` : ''}
-              {keyEst ? ` · key ${keyEst.ranked.slice(0, 3).map(c => `${keyLabel(c.tonic, c.mode)} ${c.r.toFixed(2)}`).join(' / ')}` : ''}
+              {detected ? ` · key(${detected.source}) ${detected.ranking}` : ''}
             </p>
           )}
         </div>
@@ -547,7 +601,7 @@ export default function IdentifyClient({ target, backHref, stt }: Props) {
                 <span className="text-[11px] text-zinc-500">
                   {detected.confidence >= 0.6 ? 'confident' : detected.confidence >= 0.3 ? 'likely' : 'guessing'}
                   {detected.alt && detected.confidence < 0.6 && ` · or ${detected.alt}`}
-                  {detected.snapped && ` · ${detected.sheetMode} like the sheet`}
+                  {detected.source === 'song' ? ' · fitted to the song’s chords' : detected.snapped ? ` · ${detected.sheetMode} like the sheet` : ''}
                 </span>
               </div>
             ) : keyDetectOff ? (

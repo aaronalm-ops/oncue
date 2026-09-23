@@ -8,6 +8,7 @@ import ChordSheetViewer from '@/components/ChordSheetViewer'
 import PulsePrompt from '@/components/PulsePrompt'
 import { usePulsePref } from '@/lib/use-pulse'
 import type { SongChordsData, SongTempoData } from '@/lib/chords/service-chords'
+import { isPedalNext, isPedalPrev } from '@/lib/pedal'
 
 interface Instruction { id: string; instrument: string; text: string; is_intro: boolean }
 interface Section { id: string; order_index: number; label: string; comments: string; key_change?: string | null; instructions: Instruction[] }
@@ -715,18 +716,21 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
     }
   }, [isLive, serviceId, userId, songs.length])
 
-  // Pedal / keyboard navigation (always registered, only acts when live)
+  // Pedal / keyboard navigation. A Bluetooth page-turner pedal is just a
+  // keyboard: the common ones send Right/Left, PageDown/PageUp, Down/Up or
+  // Space. Works whether or not this phone is driving Live — the pedal moves
+  // whatever this screen is showing (used to be live-mode only, which read
+  // as "the pedal doesn't work").
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (!isLiveRef.current) return
       // Don't fire when typing in an input/textarea
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
-      if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+      if (isPedalNext(e)) {
         e.preventDefault()
         goToSong(activeSongIdxRef.current + 1)
-      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      } else if (isPedalPrev(e)) {
         e.preventDefault()
         goToSong(activeSongIdxRef.current - 1)
       }

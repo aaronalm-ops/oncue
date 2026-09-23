@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { isPedalNext, isPedalPrev } from '@/lib/pedal'
 import Link from 'next/link'
 import ChordsPane from '@/components/ChordsPane'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
@@ -204,6 +205,21 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     setIsSaving(false)
   }
 
+  // Pedal / keyboard navigation — same keys as Stage View (src/lib/pedal.ts).
+  // Refs so the listener registers once and always sees the current handlers.
+  const goNextRef = useRef<() => void>(() => {})
+  const goPrevRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    function handleKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (isPedalNext(e)) { e.preventDefault(); goNextRef.current() }
+      else if (isPedalPrev(e)) { e.preventDefault(); goPrevRef.current() }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [])
+
   function goNext() {
     if (!nextFlat || isSaving) return
     setSongIdx(nextFlat.songIdx)
@@ -219,7 +235,9 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
     setSectionIdx(prev.sectionIdx)
     setNotesOpen(false)
     pushState(prev.songIdx, prev.sectionIdx)
-  }
+  }  // Keep the pedal listener pointed at this render's handlers (effect, not render — lint rule).
+  useEffect(() => { goNextRef.current = goNext; goPrevRef.current = goPrev })
+
 
   function jumpToSong(si: number) {
     setSongIdx(si)
