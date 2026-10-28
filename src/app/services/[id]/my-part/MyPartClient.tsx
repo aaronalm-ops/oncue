@@ -418,6 +418,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   const [viewInstrument, setViewInstrument] = useState(userInstrument ?? instruments[0] ?? '')
   const [activeSongIdx, setActiveSongIdx] = useState(startIdx)
   const [instrumentSheet, setInstrumentSheet] = useState(false)
+  const [runningOrderOpen, setRunningOrderOpen] = useState(false)
   const [highContrast, setHighContrast] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isLive, setIsLive] = useState(false)
@@ -841,42 +842,54 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
 
   return (
     <div className={`h-screen overflow-hidden ${bg} ${fg} flex flex-col`}>
-      {/* Running order strip */}
+      {/* Running order strip — "what's NEXT", readable from a music stand.
+          This used to be a cloud of 12-character chips ("That's what …",
+          "Breathe upon…"), which defeated its one job: knowing the next song
+          when your hands are on an instrument. Now: position + the next
+          song's FULL title (wrapping allowed), and the whole list lives in a
+          bottom sheet for jumping. */}
       <div className={`border-b ${borderB} shrink-0 px-3 py-2`}>
-        <div className="flex flex-wrap gap-1.5 items-center">
+        <div className="flex items-center gap-2">
           <Link href={`/services/${serviceId}`} aria-label="Back to service"
-            className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
+            className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${hc ? 'bg-zinc-200 text-zinc-600' : 'bg-zinc-800 text-zinc-400'}`}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
           </Link>
-          {songs.map((song, si) => {
-            const isPast = si < activeSongIdx
-            const isActive = si === activeSongIdx
-            const shortTitle = song.title.length > 12 ? song.title.slice(0, 12) + '…' : song.title
-            return (
-              <button key={song.id}
-                onClick={() => goToSong(si)}
-                className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-all active:scale-95 ${
-                  isActive
-                    ? (hc ? 'bg-black text-white' : 'bg-white text-black')
-                    : isPast
-                      ? (hc ? 'bg-zinc-200 text-zinc-400' : 'bg-zinc-950 text-zinc-600')
-                      : (hc ? 'bg-zinc-200 text-zinc-500' : 'bg-zinc-800 text-zinc-400')
-                }`}>
-                {shortTitle}
-                {song.scale && (
-                  <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
-                    isActive ? 'bg-purple-600 text-white' :
-                    isPast ? (hc ? 'text-zinc-400' : 'text-zinc-700') : 'text-purple-400'
-                  }`}>{song.scale}</span>
+
+          <button
+            onClick={() => setRunningOrderOpen(true)}
+            className={`flex-1 min-w-0 flex items-center gap-2.5 rounded-xl px-3 py-1.5 text-left active:scale-[0.99] transition-transform ${
+              hc ? 'bg-zinc-100' : 'bg-zinc-900'
+            }`}
+            aria-label="Open running order"
+          >
+            <span className={`shrink-0 text-[11px] font-bold tabular-nums ${dim}`}>
+              {activeSongIdx + 1}<span className="opacity-60">/{songs.length}</span>
+            </span>
+            {songs[activeSongIdx + 1] ? (
+              <span className="min-w-0 flex-1 flex items-center gap-2">
+                <span className={`shrink-0 text-[9px] font-black uppercase tracking-[0.18em] ${hc ? 'text-purple-700' : 'text-purple-400'}`}>Next</span>
+                <span className={`min-w-0 flex-1 text-sm font-semibold leading-tight line-clamp-2 ${fg}`}>
+                  {songs[activeSongIdx + 1].title}
+                </span>
+                {songs[activeSongIdx + 1].scale && (
+                  <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded bg-purple-600 text-white">
+                    {songs[activeSongIdx + 1].scale}
+                  </span>
                 )}
-              </button>
-            )
-          })}
+              </span>
+            ) : (
+              <span className={`flex-1 text-sm font-semibold ${dim}`}>Last song</span>
+            )}
+            <svg className={`w-4 h-4 shrink-0 ${dim}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h10" />
+            </svg>
+          </button>
+
           {/* Live indicator in strip — reflects real subscription health */}
           {isLive && (
-            <span className={`ml-auto shrink-0 flex items-center gap-1 text-[10px] font-bold ${
+            <span className={`shrink-0 flex items-center gap-1 text-[10px] font-bold ${
               liveStatus === 'live' ? 'text-green-400'
                 : liveStatus === 'offline' ? 'text-red-400' : 'text-amber-400'
             }`}>
@@ -889,6 +902,54 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
           )}
         </div>
       </div>
+
+      {/* Running order sheet — full titles, tap to jump. Same sheet idiom as
+          the instrument picker. */}
+      {runningOrderOpen && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/60" onClick={() => setRunningOrderOpen(false)} />
+          <div className={`fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border-t p-4 pb-8 max-h-[75vh] overflow-y-auto ${
+            hc ? 'bg-white border-zinc-300' : 'bg-zinc-900 border-zinc-700'
+          }`}>
+            <p className={`text-[11px] font-semibold uppercase tracking-widest mb-3 ${dim}`}>Running order</p>
+            <div className="space-y-1.5">
+              {songs.map((song, si) => {
+                const isPast = si < activeSongIdx
+                const isActive = si === activeSongIdx
+                const isNext = si === activeSongIdx + 1
+                return (
+                  <button key={song.id}
+                    onClick={() => { goToSong(si); setRunningOrderOpen(false) }}
+                    className={`w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left active:scale-[0.99] transition-transform ${
+                      isActive
+                        ? (hc ? 'bg-black text-white' : 'bg-white text-black')
+                        : isPast
+                          ? (hc ? 'bg-zinc-100 text-zinc-400' : 'bg-zinc-950 text-zinc-600')
+                          : (hc ? 'bg-zinc-200 text-zinc-800' : 'bg-zinc-800 text-zinc-200')
+                    }`}>
+                    <span className="shrink-0 w-6 text-[11px] font-bold tabular-nums opacity-60">{si + 1}</span>
+                    <span className="min-w-0 flex-1 text-base font-semibold leading-tight">{song.title}</span>
+                    {isNext && (
+                      <span className={`shrink-0 text-[9px] font-black uppercase tracking-[0.18em] ${hc ? 'text-purple-700' : 'text-purple-400'}`}>Next</span>
+                    )}
+                    {song.scale && (
+                      <span className={`shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded ${
+                        isActive ? 'bg-purple-600 text-white' : isPast ? 'opacity-60' : 'text-purple-400'
+                      }`}>{song.scale}</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+            <button
+              onClick={() => setRunningOrderOpen(false)}
+              className={`mt-4 w-full rounded-xl py-3 text-sm font-semibold ${hc ? 'bg-zinc-200 text-black' : 'bg-zinc-800 text-white'}`}
+            >
+              Close
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Floating instrument pill. Replaces the row of instrument chips that
           used to sit in the footer: almost nobody changes instrument twice in a
