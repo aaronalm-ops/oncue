@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import ChordsPane from '@/components/ChordsPane'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
 import PulsePrompt from '@/components/PulsePrompt'
+import PadControl from '@/components/PadControl'
 import { usePulsePref } from '@/lib/use-pulse'
 import type { SongChordsData, SongTempoData } from '@/lib/chords/service-chords'
 import { isPedalNext, isPedalPrev } from '@/lib/pedal'
@@ -806,6 +807,7 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
   // still clears this (and Live's ~110px footer) comfortably.
   const FLOAT_ROW = '156px'      // instrument pill (left) + fullscreen (right)
   const PANE_SWITCH_ROW = '134px' // Part/Chords tabs, centred
+  const PAD_ROW = instruments.length > 0 ? '200px' : FLOAT_ROW // pad pill, above the instrument pill
 
   const hc = highContrast
   const bg = hc ? 'bg-white' : 'bg-black'
@@ -975,6 +977,16 @@ export default function MyPartClient({ serviceId, songs, instruments, userInstru
           </span>
         </button>
       )}
+
+      {/* Ambient pad — sounds in the CHART key (what the band plays), never the
+          player's transposed view key. An impromptu share takes over while it's
+          up, exactly as the sheet on screen does. */}
+      <PadControl
+        targetKey={isLive && impromptu ? (impromptu.sharedKey ?? impromptu.storedKey) : activeSong.scale}
+        bpm={tempoBySongId[activeSong.id] ? tempos[tempoBySongId[activeSong.id].librarySongId] ?? null : null}
+        hc={hc}
+        bottom={PAD_ROW}
+      />
 
       {/* Floating fullscreen button */}
       <button

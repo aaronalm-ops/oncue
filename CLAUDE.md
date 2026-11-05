@@ -20,6 +20,7 @@ Key code map:
 - `src/app/identify/*` + `src/app/api/identify/transcribe/route.ts` + `src/lib/riva/asr.ts` (NVIDIA Riva gRPC, vendored protos in `src/lib/riva/proto`) + `src/lib/audio/{wav,key-detect,song-key}.ts` — Listen feature.
 - `src/components/BottomNav.tsx` — tab bar (Home · Chords · Listen · Me). `src/app/me` — profile page (replaced the old avatar dropdown).
 - `src/lib/live-target.ts` — where "go live" lands: today's service, else next, else last.
+- `src/lib/audio/pad-engine.ts` + `src/components/PadControl.tsx` — ambient pad (Web Audio, no samples): 4 tones chosen by ear (Shimmer/Warm/Glass/Air), LFOs locked to song bpm, 4 s crossfade on key/tone change. Pill bottom-left on Stage View + Live; chevron opens tone/volume sheet; tone+volume persist per device (`oncue.pad.tone`, `oncue.pad.volume`). Sounds in the CHART key (section key via `effectiveSectionKeys` in Live; impromptu shared key when up), never the player's view key.
 - `src/lib/pedal.ts` — Bluetooth page-turner keys (→ ↓ PageDown Space = next; ← ↑ PageUp = prev), wired into Stage View and Live.
 - `supabase/` — migrations, run IN ORDER in the Supabase SQL editor. Applied through **v21** as of this note.
 
@@ -55,20 +56,22 @@ No title/artist header. Repeat counts go in the header (`# Chorus x2`). Chords b
 - Go live works on any day: target = today's service, else next upcoming, else last.
 - Listen: lyrics (Whisper via NVIDIA) → `identify_song` trigram match on our own sheets → **song-aware key** (fit the identified sheet's chords to the room; generic Krumhansl only as fallback). Shared key beats personal key preference in Live. Subtitle text on the Listen page was cut to nothing — he found explanatory copy embarrassing; keep UI copy minimal.
 - Hum-to-identify (Shazam-style): **decided to trial, not build yet.** Shazam can't do humming; only ACRCloud query-by-humming is viable; it only knows commercial recordings. Gate: 14-day free trial, ≥70% hit rate on our top-30 songs, acceptable price for tens of requests/month. Plan doc in the claude.ai Project (`claude/hum-to-identify-plan.md`). Waiting on Aaron to create the ACRCloud account.
+- Pad: all four tones kept (he liked them all after the lighter re-render); each person picks their own in the sheet; "too heavy and deep" was the complaint about the first Warm/Glass — keep pads light and airy. Pad audio plays from the phone → one phone into the desk, screen kept on (wake lock).
 - Mid-song key changes already exist (v16): conductor writes `LAST CHORUS (KEY A)` / `KEY OF Bb` / `(UP 2)` on the section row in Excel. Planned follow-ups (Aaron asked for "full planning", approval pending): Phase 1 upload warnings for unresolvable relative markers + per-section capo/transpose hint + share text `Key of G → A`; Phase 2 remember key changes in setlist memory + a "Key →" control in the setlist editor.
 
 ## State as of 13 Oct 2026
-Pushed and live (per Aaron): perf layer C (v20 bundle), Listen with NVIDIA Whisper, song-aware key detection, nearest-service live target, tab bar + Me page, PWA icon/service-worker fix (`oncue-v9`, identity files network-first; old-logo route handlers deleted), pedal support in Live + Stage View, identify page trimmed. SQL applied through v21. If `git status` shows anything from that list uncommitted, commit it — nothing is half-built.
+Built since: Stage View running-order strip (full titles, one-tap jump, NEXT tag) and the ambient pad (above). Pushed and live (per Aaron): perf layer C (v20 bundle), Listen with NVIDIA Whisper, song-aware key detection, nearest-service live target, tab bar + Me page, PWA icon/service-worker fix (`oncue-v9`, identity files network-first; old-logo route handlers deleted), pedal support in Live + Stage View, identify page trimmed. SQL applied through v21. If `git status` shows anything from that list uncommitted, commit it — nothing is half-built.
 
 Known good field results: lyrics + song match "on point"; key now fitted to the song's chords (untested at scale, solo-voice confidence can be "likely" rather than "confident" — that's honest, not a bug).
 
 ## Next steps (in priority order)
-1. **Field test song-aware key** on Listen: sing "Blessing and Honour" in A, then in G; chip should read "A · fitted to the song's chords". Report the `key(song) …` numbers from the diagnostics line if wrong.
-2. **Decide on hum-to-identify:** create ACRCloud account → send keys → Claude builds the branch behind `ACRCLOUD_*` env vars → 14-day trial with 3 people × top-30 songs.
-3. **Key-change follow-ups (Phases 1–2 above)** once approved.
-4. **iPhone test** of Listen in installed-PWA mode (voice may be unavailable; typed fallback should work) — never verified.
-5. Renew `NVIDIA_API_KEY` before 18 Sep 2027 (reminder scheduled).
-6. Backlog ideas not approved: offline bundle of the active service; ShareSetlist key journey; chord-progression re-ranking for instrumental intros.
+1. **Field test the pad** on a real desk: phone → DI/aux, PAD on in Stage View, next song in a new key should crossfade over ~4 s; confirm the level is usable and that tone choice persists.
+2. **Field test song-aware key** on Listen: sing "Blessing and Honour" in A, then in G; chip should read "A · fitted to the song's chords". Report the `key(song) …` numbers from the diagnostics line if wrong.
+3. **Decide on hum-to-identify:** create ACRCloud account → send keys → Claude builds the branch behind `ACRCLOUD_*` env vars → 14-day trial with 3 people × top-30 songs.
+4. **Key-change follow-ups (Phases 1–2 above)** once approved.
+5. **iPhone test** of Listen in installed-PWA mode (voice may be unavailable; typed fallback should work) — never verified.
+6. Renew `NVIDIA_API_KEY` before 18 Sep 2027 (reminder scheduled).
+7. Backlog ideas not approved: offline bundle of the active service; ShareSetlist key journey; chord-progression re-ranking for instrumental intros.
 
 ## Gotchas
 - Supabase puts extensions in the `extensions` schema — any new SQL function using pg_trgm/fuzzystrmatch needs `SET search_path = public, extensions`.

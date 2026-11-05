@@ -7,7 +7,9 @@ import Link from 'next/link'
 import ChordsPane from '@/components/ChordsPane'
 import ChordSheetViewer from '@/components/ChordSheetViewer'
 import PulsePrompt from '@/components/PulsePrompt'
+import PadControl from '@/components/PadControl'
 import { usePulsePref } from '@/lib/use-pulse'
+import { effectiveSectionKeys } from '@/lib/chords/format'
 import type { SongChordsData, SongTempoData } from '@/lib/chords/service-chords'
 
 interface ImpromptuShare {
@@ -368,6 +370,14 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   // the read path fixed.
   const currentBpm = currentSong ? tempoBySongId[currentSong.id]?.tempoBpm ?? null : null
 
+  // Pad key = what the band is SOUNDING in this section: the chart key, moved
+  // by any mid-song key change (v16), or the shared impromptu key.
+  const padKey = impromptu
+    ? (impromptu.sharedKey ?? impromptu.storedKey)
+    : currentSong
+      ? effectiveSectionKeys(currentSong.scale, currentSong.sections.map(s => s.key_change ?? null))[safeSectionIdx] ?? currentSong.scale
+      : null
+
   const myInstruction = currentSection?.instructions.find(i => i.instrument === viewInstrument)
   const isMyIntro = myInstruction?.is_intro ?? false
   const nextSectionLabel = nextFlat ? songs[nextFlat.songIdx].sections[nextFlat.sectionIdx]?.label : null
@@ -434,6 +444,9 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           </div>
         </div>
       </div>
+
+      {/* Ambient pad — follows the section key and the song's tempo */}
+      <PadControl targetKey={padKey} bpm={currentBpm} hc={hc} bottom="170px" />
 
       {/* Floating fullscreen button */}
       <button
