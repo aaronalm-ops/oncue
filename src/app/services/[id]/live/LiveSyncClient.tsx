@@ -398,7 +398,7 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
   return (
     <div className={`h-screen overflow-hidden ${bg} ${fg} flex flex-col select-none`}>
 
-      {/* Running order — wraps to multiple lines so all songs stay visible */}
+      {/* Running order — EVERY song, FULL title (no truncation), wraps; next is ringed + tagged */}
       <div className={`border-b ${borderB} shrink-0 px-3 py-2`}>
         <div className="flex flex-wrap gap-1.5 items-center">
           <Link href={`/services/${serviceId}`} aria-label="Back to service"
@@ -411,21 +411,25 @@ export default function LiveSyncClient({ serviceId, userId, songs, instruments, 
           {songs.map((song, si) => {
             const isPast = si < safeSongIdx
             const isActive = si === safeSongIdx
-            const shortTitle = song.title.length > 12 ? song.title.slice(0, 12) + '…' : song.title
+            const isNext = si === safeSongIdx + 1
             return (
               <button key={song.id} onClick={() => jumpToSong(si)}
-                className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-all active:scale-95 ${
+                className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-[13px] font-semibold leading-tight text-left transition-all active:scale-95 ${
                   isActive
                     ? (hc ? 'bg-black text-white' : 'bg-white text-black')
-                    : isPast
-                      ? (hc ? 'bg-zinc-200 text-zinc-400' : 'bg-zinc-950 text-zinc-600')
-                      : (hc ? 'bg-zinc-200 text-zinc-500' : 'bg-zinc-800 text-zinc-400')
+                    : isNext
+                      ? (hc ? 'bg-purple-100 text-purple-900 ring-2 ring-purple-500' : 'bg-zinc-800 text-white ring-2 ring-purple-500')
+                      : isPast
+                        ? (hc ? 'bg-zinc-100 text-zinc-400' : 'bg-zinc-950 text-zinc-600')
+                        : (hc ? 'bg-zinc-200 text-zinc-700' : 'bg-zinc-800 text-zinc-300')
                 }`}>
-                {shortTitle}
+                {isNext && (
+                  <span className={`shrink-0 text-[9px] font-black uppercase tracking-[0.18em] ${hc ? 'text-purple-700' : 'text-purple-400'}`}>Next</span>
+                )}
+                <span>{song.title}</span>
                 {song.scale && (
-                  <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${
-                    isActive ? 'bg-purple-600 text-white' :
-                    isPast ? (hc ? 'text-zinc-400' : 'text-zinc-700') : 'text-purple-400'
+                  <span className={`shrink-0 text-[9px] font-black px-1 py-0.5 rounded ${
+                    isActive ? 'bg-purple-600 text-white' : isPast ? 'opacity-60' : (hc ? 'text-purple-700' : 'text-purple-400')
                   }`}>{song.scale}</span>
                 )}
               </button>
